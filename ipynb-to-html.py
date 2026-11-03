@@ -8,7 +8,7 @@ Usage:
     python ipynb-to-html.py notebook.ipynb
     python ipynb-to-html.py notebook.ipynb -o out.html
     python ipynb-to-html.py notebook.ipynb --notes notes.json
-    python ipynb-to-html.py notebook.ipynb --no-notes
+    python ipynb-to-html.py notebook.ipynb --readonly-notes
 
 Requires Node.js on PATH (``node``). See ``ipynb-to-html.js`` for the notes schema
 and interactive HTML behavior. Open ``viewer.html`` to pick one notebook.
@@ -40,7 +40,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         epilog=(
             "Notes are not stored in the notebook. "
             "--notes FILE includes a notes JSON file for this run. "
-            "--no-notes shows notes but blocks adding or editing them. "
+            "--readonly-notes shows notes but blocks adding or editing them. "
             "Implementation: docs/ipynb-to-html.js"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -55,9 +55,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Include this notes JSON file in the page",
     )
     p.add_argument(
-        "--no-notes",
+        "--readonly-notes",
         action="store_true",
-        help="Generate a page where notes cannot be added or edited",
+        help="Show notes, but block adding or editing them",
     )
     return p.parse_args(argv)
 
@@ -85,8 +85,8 @@ def main(argv: list[str] | None = None) -> int:
         cmd.extend(["--title", args.title])
     if args.notes is not None:
         cmd.extend(["--notes", str(args.notes)])
-    if args.no_notes:
-        cmd.append("--no-notes")
+    if args.readonly_notes:
+        cmd.append("--readonly-notes")
 
     try:
         proc = subprocess.run(cmd, check=False)

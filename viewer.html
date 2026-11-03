@@ -347,7 +347,7 @@
   var diffValue = query.get("diff");
   var pairMode = diffValue === "pair";
   var sameMode = !query.has("diff");
-  var noNotes = query.has("no-notes");
+  var readonlyNotes = query.has("readonly-notes");
 
   var baseNb = null;
   var headNb = null;
@@ -365,7 +365,7 @@
     var parts = [];
     if (pairMode) parts.push("diff=pair");
     else if (!sameMode) parts.push("diff");
-    if (noNotes) parts.push("no-notes");
+    if (readonlyNotes) parts.push("readonly-notes");
     var next = window.location.pathname +
       (parts.length ? "?" + parts.join("&") : "") +
       window.location.hash;
@@ -374,8 +374,8 @@
   }
 
   function setNotesButtons() {
-    document.getElementById("notes-allow").setAttribute("aria-pressed", noNotes ? "false" : "true");
-    document.getElementById("notes-disallow").setAttribute("aria-pressed", noNotes ? "true" : "false");
+    document.getElementById("notes-allow").setAttribute("aria-pressed", readonlyNotes ? "false" : "true");
+    document.getElementById("notes-disallow").setAttribute("aria-pressed", readonlyNotes ? "true" : "false");
   }
 
   function setViewButtons() {
@@ -470,8 +470,8 @@
   }
 
   function selectNotes(locked) {
-    if (noNotes === locked) return;
-    noNotes = locked;
+    if (readonlyNotes === locked) return;
+    readonlyNotes = locked;
     setNotesButtons();
     syncUrl();
     lastHtml = null;
@@ -551,7 +551,7 @@
           exportSourceName: headName || "notebook.ipynb",
           noteStorageKey: headName || "notebook.ipynb",
           notes: notes,
-          allowNotes: !noNotes
+          allowNotes: !readonlyNotes
         });
         lastName = headStem + ".html";
       } else {
@@ -583,7 +583,7 @@
           exportSourceName: headName || "head.ipynb",
           noteStorageKey: headName || "head.ipynb",
           notes: notes,
-          allowNotes: !noNotes,
+          allowNotes: !readonlyNotes,
           diffInitialMode: "filtered"
         });
         lastName = baseStem + "__diff__" + headStem + ".html";

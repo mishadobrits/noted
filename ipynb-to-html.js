@@ -8,11 +8,11 @@
  *   node ipynb-to-html.js notebook.ipynb
  *   node ipynb-to-html.js notebook.ipynb -o out.html
  *   node ipynb-to-html.js notebook.ipynb --notes notes.json
- *   node ipynb-to-html.js notebook.ipynb --no-notes
+ *   node ipynb-to-html.js notebook.ipynb --readonly-notes
  *
  * Notes are not read from or written into the notebook. Pass --notes to
- * include a notes JSON file. --no-notes shows those notes but blocks
- * adding or editing them. The same lock is viewer.html?no-notes.
+ * include a notes JSON file. --readonly-notes shows those notes but blocks
+ * adding or editing them. The same lock is viewer.html?readonly-notes.
  *
  * Module API (CommonJS / browser global IpynbToHtml):
  *   convertNotebookToHtml(notebookObj, { title, sourceName, notes, allowNotes })
@@ -2852,12 +2852,12 @@ if (typeof require !== "undefined" && typeof module !== "undefined" && require.m
 
     function usage() {
       process.stderr.write(
-        "Usage: node ipynb-to-html.js notebook.ipynb [-o out.html] [--title T] [--notes notes.json] [--no-notes]\n"
+        "Usage: node ipynb-to-html.js notebook.ipynb [-o out.html] [--title T] [--notes notes.json] [--readonly-notes]\n"
       );
     }
 
     function parseArgs(argv) {
-      var args = { notebook: null, output: null, title: null, notes: null, noNotes: false };
+      var args = { notebook: null, output: null, title: null, notes: null, readonlyNotes: false };
       var i = 0;
       while (i < argv.length) {
         var a = argv[i];
@@ -2870,8 +2870,8 @@ if (typeof require !== "undefined" && typeof module !== "undefined" && require.m
         } else if (a === "--notes") {
           if (i + 1 >= argv.length) throw new Error("--notes requires a path");
           args.notes = argv[++i];
-        } else if (a === "--no-notes") {
-          args.noNotes = true;
+        } else if (a === "--readonly-notes") {
+          args.readonlyNotes = true;
         } else if (a === "-h" || a === "--help") {
           usage();
           process.exit(0);
@@ -2936,7 +2936,7 @@ if (typeof require !== "undefined" && typeof module !== "undefined" && require.m
         title: title,
         sourceName: path.basename(nbPath),
         notes: notes,
-        allowNotes: !args.noNotes,
+        allowNotes: !args.readonlyNotes,
       });
       var dir = path.dirname(outPath);
       if (dir && dir !== ".") fs.mkdirSync(dir, { recursive: true });
