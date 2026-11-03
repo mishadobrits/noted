@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multi-notebook grading showcase</title>
+<style>
+  :root {
+    --bg: #eef1f5;
+    --panel: #ffffff;
+    --ink: #17202a;
+    --muted: #66717e;
+    --line: #cbd2da;
+    --accent: #285d8f;
+    --accent-soft: #e2effb;
+    --success: #28784b;
+    --success-soft: #e2f3e9;
+    --column-width: calc(100vw - 1.3rem);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    overflow: hidden;
+    color: var(--ink);
+    background: var(--bg);
+    font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  button, input, select { font: inherit; }
+  button {
+    border: 1px solid var(--line);
+    border-radius: 0.45rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--panel);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); background: #f6faff; }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: white; }
+  .loader {
+    height: 100%;
+    overflow: auto;
+    padding: clamp(1.2rem, 5vw, 4rem) 1.2rem;
+  }
+  .loader-card {
+    width: min(52rem, 100%);
+    margin: 0 auto;
+    padding: 1.5rem;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 0.8rem;
+    box-shadow: 0 16px 50px rgba(38, 49, 61, 0.08);
+  }
+  h1 { margin: 0 0 0.45rem; font-size: 1.65rem; }
+  .lede { margin: 0 0 1.3rem; color: var(--muted); max-width: 45rem; }
+  .file-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; }
+  .file-box { border: 1px solid var(--line); border-radius: 0.55rem; padding: 0.8rem; }
+  .file-box.tasks-file { grid-column: 1 / -1; }
+  .file-box strong { display: block; margin-bottom: 0.4rem; }
+  .file-box input { width: 100%; }
+  .loader-actions { display: flex; flex-wrap: wrap; gap: 0.65rem; margin-top: 1rem; }
+  .status { min-height: 1.35em; margin-top: 0.8rem; color: var(--muted); }
+  .status.error { color: #9c2f2f; }
+  .app { height: 100%; position: relative; }
+  .app[hidden], .loader[hidden] { display: none; }
+  .top-actions {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 0.8rem;
+    z-index: 30;
+  }
+  .top-actions-panel {
+    position: absolute;
+    top: 0;
+    right: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.5rem;
+    border: 1px solid var(--line);
+    border-top: 0;
+    border-radius: 0 0 0.55rem 0.55rem;
+    background: rgba(255,255,255,0.97);
+    box-shadow: 0 5px 18px rgba(31, 43, 54, 0.16);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(calc(-100% - 0.25rem));
+    transition: opacity 120ms ease, transform 120ms ease;
+  }
+  .top-actions:hover .top-actions-panel,
+  .top-actions:focus-within .top-actions-panel {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+  .columns-viewport { height: 100%; min-height: 0; overflow-x: auto; overflow-y: hidden; padding: 0.65rem; }
+  .columns { height: 100%; display: flex; gap: 0.65rem; width: max-content; }
+  .submission-column {
+    width: var(--column-width);
+    height: 100%;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    background: var(--panel);
+    border: 2px solid transparent;
+    border-radius: 0.65rem;
+    overflow: hidden;
+    box-shadow: 0 4px 18px rgba(33, 43, 54, 0.08);
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+  }
+  .column-head {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.55rem 0.7rem;
+    border-bottom: 1px solid var(--line);
+    background: #fbfcfd;
+    cursor: pointer;
+  }
+  .student-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .column-head .spacer { flex: 1; }
+  .grade-chip { color: var(--muted); white-space: nowrap; }
+  .grade-chip.graded { color: var(--success); font-weight: 700; }
+  iframe { width: 100%; height: 100%; border: 0; background: #f6f7f9; }
+  dialog {
+    width: min(31rem, calc(100vw - 2rem));
+    border: 1px solid var(--line);
+    border-radius: 0.7rem;
+    padding: 0;
+    box-shadow: 0 24px 70px rgba(15, 25, 35, 0.28);
+  }
+  dialog::backdrop { background: rgba(20, 29, 38, 0.45); }
+  .grade-form { padding: 1.2rem; }
+  .grade-form h2 { margin: 0 0 0.35rem; font-size: 1.2rem; }
+  .grade-context { color: var(--muted); margin-bottom: 1rem; }
+  .grade-form label { display: block; margin: 0.7rem 0; color: var(--muted); }
+  .grade-form input, .grade-form select { display: block; width: 100%; margin-top: 0.3rem; padding: 0.6rem; border: 1px solid var(--line); border-radius: 0.45rem; color: var(--ink); background:#fff; }
+  .dialog-actions { display: flex; justify-content: flex-end; gap: 0.55rem; margin-top: 1rem; }
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 1rem;
+    transform: translateX(-50%);
+    z-index: 20;
+    padding: 0.6rem 0.85rem;
+    border-radius: 0.5rem;
+    background: #17202a;
+    color: white;
+    box-shadow: 0 7px 24px rgba(0,0,0,0.2);
+  }
+  .toast[hidden] { display: none; }
+  @media (max-width: 760px) {
+    .file-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+  <section class="loader" id="loader">
+    <div class="loader-card">
+      <h1>Multi-notebook grading showcase</h1>
+      <p class="lede">
+        Compare several submissions with one base homework notebook. The selected submission drives
+        synchronized scrolling; Enter grades the task containing the currently focused cell.
+      </p>
+      <div class="file-grid">
+        <label class="file-box">
+          <strong>Base homework</strong>
+          <input type="file" id="base-file">
+        </label>
+        <label class="file-box">
+          <strong>Student submissions</strong>
+          <input type="file" id="student-files" multiple>
+        </label>
+        <label class="file-box tasks-file">
+          <strong>Task ranges JSON (optional)</strong>
+          <input type="file" id="task-file" accept="application/json,.json">
+          <span>Uses <code>start_cell_id</code>, inclusive <code>end_cell_id</code>, and <code>points</code>.</span>
+        </label>
+        <label class="file-box tasks-file">
+          <strong>Student notes (optional)</strong>
+          <input type="file" id="notes-files" accept="application/json,.json" multiple>
+          <span>Select one notes JSON per student, in the same order as the student submissions.</span>
+        </label>
+      </div>
+      <div class="loader-actions">
+        <button type="button" class="primary" id="open-selected">Open selected notebooks</button>
+      </div>
+      <div class="status" id="load-status">Choose one base notebook and one or more student submissions.</div>
+    </div>
+  </section>
+
+  <main class="app" id="app" hidden>
+    <div class="top-actions" aria-label="File actions">
+      <div class="top-actions-panel">
+        <button type="button" id="export-grades">Export grades</button>
+        <button type="button" id="change-files">Change files</button>
+      </div>
+    </div>
+    <div class="columns-viewport" id="columns-viewport">
+      <div class="columns" id="columns"></div>
+    </div>
+  </main>
+
+  <dialog id="grade-dialog">
+    <form class="grade-form" id="grade-form" method="dialog">
+      <h2>How would you grade this task?</h2>
+      <div class="grade-context" id="grade-context"></div>
+      <label>Grade
+        <input id="grade-value" type="number" min="0" step="any" autocomplete="off" required>
+      </label>
+      <label>Short comment (optional)
+        <input id="grade-comment" autocomplete="off">
+      </label>
+      <label>After saving
+        <select id="grade-destination">
+          <option value="stay">Stay here</option>
+          <option value="next-student" selected>Same task — next notebook</option>
+          <option value="next-task">Next task — same notebook</option>
+        </select>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" id="grade-cancel">Cancel</button>
+        <button type="submit" class="primary">Save grade</button>
+      </div>
+    </form>
+  </dialog>
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="./html-sanitize.js?v=output-sanitize-1"></script>
+  <script src="./notebook-styles.js?v=nested-lists-1"></script>
+  <script src="./notebook-viewer.js?v=output-sanitize-1"></script>
+  <script src="./notebook-diff-mode.js?v=viewer-split-1"></script>
+  <script src="./ipynb-to-html.js?v=output-sanitize-1"></script>
+  <script src="./notebook-diff.js?v=grader-flow-3"></script>
+  <script src="./multi-notebook-tasks.js?v=multi-grader-4"></script>
+  <script src="./multi-notebook-core.js?v=multi-grader-4"></script>
+  <script src="./multi-notebook-grader.js?v=multi-grader-12"></script>
+</body>
+</html>

@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title></title>
+<style>
+  :root {
+    --bg: #f6f4ef;
+    --ink: #1c1b19;
+    --muted: #5c574e;
+    --line: #d9d2c5;
+    --accent: #0f5c4c;
+    --panel: #fffdf8;
+    --drop: #e7efe9;
+    --drop-border: #0f5c4c;
+    --del: #c5221f;
+    --add: #137333;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    color: var(--ink);
+    background:
+      radial-gradient(ellipse 80% 50% at 10% -10%, #e7efe9 0%, transparent 55%),
+      radial-gradient(ellipse 60% 40% at 100% 0%, #efe6d8 0%, transparent 50%),
+      var(--bg);
+    min-height: 100vh;
+  }
+  .shell {
+    max-width: 52rem;
+    margin: 0 auto;
+    padding: 2.5rem 1.25rem 3rem;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 0.35rem;
+    padding: 1.25rem 1.35rem;
+  }
+  .load-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.85rem;
+    align-items: stretch;
+  }
+  @media (max-width: 560px) {
+    .load-row { grid-template-columns: 1fr; }
+  }
+  .drop-zone {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    font-size: 0.95rem;
+    border: 1.5px dashed var(--line);
+    border-radius: 0.35rem;
+    padding: 0.85rem 0.9rem;
+    background: #fff;
+    transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+    min-height: 5.5rem;
+  }
+  .drop-zone.dragover {
+    border-color: var(--drop-border);
+    border-style: solid;
+    background: var(--drop);
+    box-shadow: inset 0 0 0 1px var(--drop-border);
+  }
+  .drop-zone.base .dz-title { color: var(--del); }
+  .drop-zone.head .dz-title { color: var(--add); }
+  .drop-zone.pair .dz-title, .drop-zone.notes .dz-title, .drop-zone.same .dz-title { color: var(--accent); }
+  .drop-zone.pair { margin-top: 0.85rem; }
+  .file-row { margin-top: 0; }
+  .panel.mode-same .file-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.85rem;
+    align-items: stretch;
+  }
+  .panel:not(.mode-same) .file-row { margin-top: 0.85rem; }
+  @media (max-width: 560px) {
+    .panel.mode-same .file-row { grid-template-columns: 1fr; }
+  }
+  .drop-zone .dz-title {
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .drop-zone .dz-hint {
+    font-size: 0.8rem;
+    color: var(--muted);
+    line-height: 1.35;
+  }
+  .drop-zone .dz-file {
+    font-size: 0.82rem;
+    color: var(--accent);
+    min-height: 1.2em;
+  }
+  .drop-zone input[type="file"] {
+    font: inherit;
+    max-width: 100%;
+    margin-top: 0.15rem;
+  }
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    margin-top: 1rem;
+    align-items: center;
+  }
+  .diff-options {
+    min-width: 0;
+  }
+  .diff-options label {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 0.3rem;
+  }
+  .diff-options textarea {
+    display: block;
+    width: 100%;
+    min-height: 4.4rem;
+    resize: vertical;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid var(--line);
+    border-radius: 0.3rem;
+    background: #fff;
+    color: var(--ink);
+    font: 0.84rem/1.4 ui-monospace, Menlo, Consolas, monospace;
+  }
+  .diff-options .option-hint {
+    margin-top: 0.3rem;
+    color: var(--muted);
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
+  .diff-workspace {
+    width: 100%;
+    padding: 0 0.75rem 1.5rem;
+  }
+  .diff-frame {
+    display: block;
+    width: 100%;
+    min-height: max(42rem, calc(100vh - 2rem));
+    border: 1px solid var(--line);
+    border-radius: 0.35rem;
+    background: #fff;
+  }
+  dialog.regex-dialog {
+    width: min(38rem, calc(100vw - 2rem));
+    border: 1px solid var(--line);
+    border-radius: 0.4rem;
+    padding: 1rem 1.15rem;
+    background: var(--panel);
+    color: var(--ink);
+    box-shadow: 0 12px 42px rgba(0, 0, 0, 0.24);
+  }
+  dialog.regex-dialog::backdrop { background: rgba(0, 0, 0, 0.38); }
+  .regex-dialog h2 { margin: 0 0 0.8rem; font-size: 1.15rem; }
+  .regex-dialog .row { justify-content: flex-end; }
+  button {
+    font: inherit;
+    font-size: 0.95rem;
+    padding: 0.45rem 0.9rem;
+    border-radius: 0.3rem;
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--ink);
+    cursor: pointer;
+  }
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #f7fffc;
+  }
+  button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  code {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.88em;
+  }
+  .panel-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem 1.25rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+  }
+  .control {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  .control-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .segment {
+    display: inline-flex;
+    border: 1px solid var(--line);
+    border-radius: 0.3rem;
+    overflow: hidden;
+    background: #fff;
+  }
+  .segment button {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding: 0.32rem 0.72rem;
+    font-size: 0.88rem;
+  }
+  .segment button + button { border-left: 1px solid var(--line); }
+  .segment button[aria-pressed="true"] {
+    background: var(--accent);
+    color: #f7fffc;
+  }
+  .segment button:hover { background: #f3f0e8; }
+  .segment button[aria-pressed="true"]:hover { background: var(--accent); }
+</style>
+</head>
+<body>
+  <div class="shell">
+    <div class="panel mode-same">
+      <div class="panel-controls">
+        <div class="control">
+          <span class="control-label" id="notes-control-label">Noting</span>
+          <div class="segment" role="group" aria-labelledby="notes-control-label">
+            <button type="button" id="notes-allow" aria-pressed="true" title="The opened page can add and edit notes">Allow</button>
+            <button type="button" id="notes-disallow" aria-pressed="false" title="The opened page can show notes, but not add or edit them">Disallow</button>
+          </div>
+        </div>
+        <div class="control">
+          <span class="control-label" id="view-control-label">View</span>
+          <div class="segment" role="group" aria-labelledby="view-control-label">
+            <button type="button" id="view-nodiff" aria-pressed="true" title="Open one notebook without diff highlighting">No diff</button>
+            <button type="button" id="view-diff" aria-pressed="false" title="Compare two notebooks">Diff</button>
+          </div>
+        </div>
+      </div>
+      <div class="load-row" hidden>
+        <div class="drop-zone base" id="drop-base" data-kind="base">
+          <span class="dz-title">Base (old)</span>
+          <span class="dz-hint"><code>.ipynb</code></span>
+          <span class="dz-file" id="base-label"></span>
+          <input type="file" id="file-base" accept=".ipynb,application/json,application/x-ipynb+json">
+        </div>
+        <div class="drop-zone head" id="drop-head" data-kind="head">
+          <span class="dz-title">Head (new)</span>
+          <span class="dz-hint"><code>.ipynb</code></span>
+          <span class="dz-file" id="head-label"></span>
+          <input type="file" id="file-head" accept=".ipynb,application/json,application/x-ipynb+json">
+        </div>
+      </div>
+      <div class="drop-zone pair" id="drop-pair" hidden>
+        <span class="dz-title">Base and head</span>
+        <span class="dz-hint">Two <code>.ipynb</code> files. First is base, second is head.</span>
+        <span class="dz-file" id="pair-label"></span>
+        <input type="file" id="file-pair" multiple accept=".ipynb,application/json,application/x-ipynb+json">
+      </div>
+      <div class="file-row" id="file-row">
+        <div class="drop-zone same" id="drop-same">
+          <span class="dz-title">Load notebook</span>
+          <span class="dz-hint">Drop a <code>.ipynb</code>, or choose a file.</span>
+          <span class="dz-file" id="same-label"></span>
+          <input type="file" id="file-same" accept=".ipynb,application/json,application/x-ipynb+json">
+        </div>
+        <div class="drop-zone notes" id="drop-notes">
+          <span class="dz-title">Load notes</span>
+          <span class="dz-hint">Optional <code>.json</code>.</span>
+          <span class="dz-file" id="notes-label"></span>
+          <input type="file" id="notes-file" accept="application/json,.json">
+        </div>
+      </div>
+      <div class="row">
+        <button type="button" class="primary" id="btn-open" disabled>Open notebook</button>
+        <button type="button" id="btn-download" disabled>Download as HTML</button>
+      </div>
+    </div>
+  </div>
+  <section class="diff-workspace" id="diff-workspace" hidden>
+    <iframe class="diff-frame" id="diff-frame" title="Notebook preview"></iframe>
+  </section>
+  <dialog class="regex-dialog" id="regex-dialog" aria-labelledby="regex-dialog-title">
+    <h2 id="regex-dialog-title">Diff filters</h2>
+    <div class="diff-options">
+      <label for="ignore-deletions">Hide deleted lines or inline removals matching these regular expressions</label>
+      <textarea id="ignore-deletions" spellcheck="false" aria-describedby="ignore-deletions-hint">^[^A-Za-zА-Яа-яЁё0-9]*$</textarea>
+      <div class="option-hint" id="ignore-deletions-hint">
+        One JavaScript regular expression per line. The default hides any removed
+        text that contains no Latin/Cyrillic letter and no digit.
+      </div>
+      <label for="ignore-additions">Hide added lines or inline additions matching these regular expressions</label>
+      <textarea id="ignore-additions" spellcheck="false" aria-describedby="ignore-additions-hint">^\s*$</textarea>
+      <div class="option-hint" id="ignore-additions-hint">
+        One JavaScript regular expression per line. The default hides additions
+        made entirely of whitespace.
+      </div>
+    </div>
+    <div class="row">
+      <button type="button" id="btn-regex-cancel">Cancel</button>
+      <button type="button" class="primary" id="btn-regex-apply">Apply</button>
+    </div>
+  </dialog>
+  <script src="./html-sanitize.js?v=output-sanitize-1"></script>
+  <script src="./notebook-styles.js?v=nested-lists-1"></script>
+  <script src="./notebook-viewer.js?v=output-sanitize-1"></script>
+  <script src="./notebook-diff-mode.js?v=viewer-split-1"></script>
+  <script src="./ipynb-to-html.js?v=output-sanitize-1"></script>
+  <script src="./notebook-diff.js?v=grader-flow-3"></script>
+  <script>
+(function () {
+  var baseInput = document.getElementById("file-base");
+  var headInput = document.getElementById("file-head");
+  var dropBase = document.getElementById("drop-base");
+  var dropHead = document.getElementById("drop-head");
+  var loadRow = document.querySelector(".load-row");
+  var pairInput = document.getElementById("file-pair");
+  var dropPair = document.getElementById("drop-pair");
+  var baseLabel = document.getElementById("base-label");
+  var headLabel = document.getElementById("head-label");
+  var pairLabel = document.getElementById("pair-label");
+  var btnOpen = document.getElementById("btn-open");
+  var btnDownload = document.getElementById("btn-download");
+  var ignoreDeletions = document.getElementById("ignore-deletions");
+  var ignoreAdditions = document.getElementById("ignore-additions");
+  var regexDialog = document.getElementById("regex-dialog");
+  var btnRegexCancel = document.getElementById("btn-regex-cancel");
+  var btnRegexApply = document.getElementById("btn-regex-apply");
+  var diffWorkspace = document.getElementById("diff-workspace");
+  var diffFrame = document.getElementById("diff-frame");
+  var notesInput = document.getElementById("notes-file");
+  var dropNotes = document.getElementById("drop-notes");
+  var notesLabel = document.getElementById("notes-label");
+  var dropSame = document.getElementById("drop-same");
+  var sameInput = document.getElementById("file-same");
+  var sameLabel = document.getElementById("same-label");
+  var panel = document.querySelector(".panel");
+  var query = new URLSearchParams(window.location.search);
+  var diffValue = query.get("diff");
+  var pairMode = diffValue === "pair";
+  var sameMode = !query.has("diff");
+  var noNotes = query.has("no-notes");
+
+  var baseNb = null;
+  var headNb = null;
+  var savedDiff = null;
+  var baseName = "";
+  var headName = "";
+  var pendingNotes = null;
+  var pendingNotesLabel = "";
+  var lastHtml = null;
+  var lastName = "notebook-diff.html";
+  var appliedIgnorePatterns = ignoreDeletions.value;
+  var appliedIgnoreAdditionPatterns = ignoreAdditions.value;
+
+  function syncUrl() {
+    var parts = [];
+    if (pairMode) parts.push("diff=pair");
+    else if (!sameMode) parts.push("diff");
+    if (noNotes) parts.push("no-notes");
+    var next = window.location.pathname +
+      (parts.length ? "?" + parts.join("&") : "") +
+      window.location.hash;
+    var current = window.location.pathname + window.location.search + window.location.hash;
+    if (next !== current) history.replaceState(null, "", next);
+  }
+
+  function setNotesButtons() {
+    document.getElementById("notes-allow").setAttribute("aria-pressed", noNotes ? "false" : "true");
+    document.getElementById("notes-disallow").setAttribute("aria-pressed", noNotes ? "true" : "false");
+  }
+
+  function setViewButtons() {
+    var nodiff = !!sameMode;
+    document.getElementById("view-nodiff").setAttribute("aria-pressed", nodiff ? "true" : "false");
+    document.getElementById("view-diff").setAttribute("aria-pressed", nodiff ? "false" : "true");
+  }
+
+  function applyChrome() {
+    panel.classList.toggle("mode-same", !!sameMode);
+    if (sameMode) {
+      loadRow.hidden = true;
+      dropSame.hidden = false;
+      dropPair.hidden = true;
+      btnOpen.textContent = "Open notebook";
+    } else if (pairMode) {
+      loadRow.hidden = true;
+      dropPair.hidden = false;
+      dropSame.hidden = true;
+      btnOpen.textContent = "Open diff";
+    } else {
+      loadRow.hidden = false;
+      dropPair.hidden = true;
+      dropSame.hidden = true;
+      btnOpen.textContent = "Open diff";
+    }
+    setNotesButtons();
+    setViewButtons();
+    syncUrl();
+  }
+
+  function showPrepared(htmlReady) {
+    if (htmlReady) updateActions();
+    else {
+      diffWorkspace.hidden = true;
+      btnOpen.disabled = true;
+      btnDownload.disabled = true;
+    }
+  }
+
+  function selectNoDiff() {
+    if (sameMode) return;
+    savedDiff = {
+      pairMode: pairMode,
+      baseNb: baseNb,
+      headNb: headNb,
+      baseName: baseName,
+      headName: headName,
+      pairText: pairLabel.textContent
+    };
+    var nb = headNb || baseNb;
+    var name = (headNb ? headName : baseName) || "";
+    pairMode = false;
+    sameMode = true;
+    if (nb) {
+      baseNb = JSON.parse(JSON.stringify(nb));
+      headNb = JSON.parse(JSON.stringify(nb));
+      baseName = name;
+      headName = name;
+      sameLabel.textContent = name;
+    } else {
+      baseNb = null;
+      headNb = null;
+      baseName = "";
+      headName = "";
+      sameLabel.textContent = "";
+    }
+    lastHtml = null;
+    applyChrome();
+    showPrepared(!!nb);
+  }
+
+  function selectDiff() {
+    if (!sameMode) return;
+    if (savedDiff) {
+      pairMode = !!savedDiff.pairMode;
+      baseNb = savedDiff.baseNb;
+      headNb = savedDiff.headNb;
+      baseName = savedDiff.baseName || "";
+      headName = savedDiff.headName || "";
+      pairLabel.textContent = savedDiff.pairText || "";
+      savedDiff = null;
+    } else {
+      pairMode = false;
+    }
+    sameMode = false;
+    if (baseName) baseLabel.textContent = baseName;
+    if (headName) headLabel.textContent = headName;
+    lastHtml = null;
+    applyChrome();
+    showPrepared(!!(baseNb && headNb));
+  }
+
+  function selectNotes(locked) {
+    if (noNotes === locked) return;
+    noNotes = locked;
+    setNotesButtons();
+    syncUrl();
+    lastHtml = null;
+    if (baseNb && headNb) updateActions();
+  }
+
+  applyChrome();
+
+  function updateActions() {
+    var ready = !!(baseNb && headNb);
+    btnOpen.disabled = !ready;
+    btnDownload.disabled = !ready || !lastHtml;
+    if (ready && !lastHtml) maybeConvert(false);
+    if (ready && pairMode && diffWorkspace.hidden && lastHtml) {
+      showDiff(lastHtml, true);
+    } else if (ready && !diffWorkspace.hidden && lastHtml) {
+      diffFrame.srcdoc = lastHtml;
+    }
+  }
+
+  function showDiff(html, shouldScroll) {
+    if (!html) return;
+    diffFrame.srcdoc = html;
+    diffWorkspace.hidden = false;
+    if (shouldScroll) {
+      diffWorkspace.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+
+  function loadNotebook(file, side) {
+    if (!window.IpynbToHtml || typeof IpynbToHtml.loadNotebookJson !== "function") return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var nb = IpynbToHtml.loadNotebookJson(String(reader.result || ""));
+        if (side === "base") {
+          baseNb = nb;
+          baseName = file.name;
+          baseLabel.textContent = file.name;
+        } else {
+          headNb = nb;
+          headName = file.name;
+          headLabel.textContent = file.name;
+        }
+        lastHtml = null;
+        updateActions();
+      } catch (e) {}
+    };
+    reader.readAsText(file);
+  }
+
+  function loadNotebookPair(files) {
+    var notebooks = Array.prototype.filter.call(files || [], looksLikeNotebook);
+    if (notebooks.length !== 2 || notebooks.length !== (files ? files.length : 0)) return;
+    baseNb = null;
+    headNb = null;
+    lastHtml = null;
+    diffWorkspace.hidden = true;
+    pairLabel.textContent = notebooks[0].name + " → " + notebooks[1].name;
+    loadNotebook(notebooks[0], "base");
+    loadNotebook(notebooks[1], "head");
+  }
+
+  function maybeConvert(force) {
+    if (!baseNb || !headNb) return null;
+    if (!sameMode && (!window.NotebookDiff || typeof NotebookDiff.mergeNotebooks !== "function")) return null;
+    if (!force && lastHtml) return lastHtml;
+    try {
+      var notes = pendingNotes != null ? pendingNotes : [];
+      var baseStem = (baseName || "base").replace(/\.ipynb$/i, "");
+      var headStem = (headName || "head").replace(/\.ipynb$/i, "");
+      if (sameMode) {
+        lastHtml = IpynbToHtml.convertNotebookToHtml(headNb, {
+          title: headStem,
+          sourceName: headName || "notebook.ipynb",
+          exportNotebook: headNb,
+          exportSourceName: headName || "notebook.ipynb",
+          noteStorageKey: headName || "notebook.ipynb",
+          notes: notes,
+          allowNotes: !noNotes
+        });
+        lastName = headStem + ".html";
+      } else {
+        var ignoreDeletionPatterns = String(ignoreDeletions.value || "")
+          .split(/\r?\n/)
+          .filter(function (line) { return line.trim() !== ""; });
+        var ignoreAdditionPatterns = String(ignoreAdditions.value || "")
+          .split(/\r?\n/)
+          .filter(function (line) { return line.trim() !== ""; });
+        var merged = NotebookDiff.mergeNotebooks(baseNb, headNb, {
+          baseName: baseName || "base.ipynb",
+          headName: headName || "head.ipynb"
+        });
+        var filteredMerged = NotebookDiff.mergeNotebooks(baseNb, headNb, {
+          baseName: baseName || "base.ipynb",
+          headName: headName || "head.ipynb",
+          ignoreDeletionPatterns: ignoreDeletionPatterns,
+          ignoreAdditionPatterns: ignoreAdditionPatterns
+        });
+        NotebookDiff.attachDiffVariant(
+          merged.notebook,
+          filteredMerged.notebook,
+          "filtered"
+        );
+        lastHtml = IpynbToHtml.convertNotebookToHtml(merged.notebook, {
+          title: baseStem + " → " + headStem,
+          sourceName: (baseName || "base.ipynb") + " → " + (headName || "head.ipynb"),
+          exportNotebook: headNb,
+          exportSourceName: headName || "head.ipynb",
+          noteStorageKey: headName || "head.ipynb",
+          notes: notes,
+          allowNotes: !noNotes,
+          diffInitialMode: "filtered"
+        });
+        lastName = baseStem + "__diff__" + headStem + ".html";
+      }
+      btnDownload.disabled = false;
+      return lastHtml;
+    } catch (e) {
+      lastHtml = null;
+      btnDownload.disabled = true;
+      return null;
+    }
+  }
+
+  function looksLikeNotebook(file) {
+    return /\.ipynb$/i.test((file && file.name) || "");
+  }
+  function looksLikeNotes(file) {
+    var name = (file && file.name) || "";
+    return /\.json$/i.test(name);
+  }
+  function coerceNotesArray(data) {
+    if (Array.isArray(data)) return data;
+    if (data && typeof data === "object" && Array.isArray(data.notes)) return data.notes;
+    throw new Error("Expected a notes JSON array, or { notes: [...] }");
+  }
+  function updateNotesChip() {
+    if (notesLabel) notesLabel.textContent = pendingNotes && pendingNotesLabel ? pendingNotesLabel : "";
+  }
+  function loadPendingNotes(file) {
+    if (!window.IpynbToHtml || typeof IpynbToHtml.parseNotesList !== "function") return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var data = JSON.parse(String(reader.result || ""));
+        pendingNotes = IpynbToHtml.parseNotesList(coerceNotesArray(data), file.name || "notes");
+        pendingNotesLabel = file.name;
+        updateNotesChip();
+        lastHtml = null;
+        updateActions();
+      } catch (e) {
+        pendingNotes = null;
+        pendingNotesLabel = "";
+        updateNotesChip();
+      }
+    };
+    reader.readAsText(file);
+  }
+  function loadSameNotebook(file) {
+    if (!window.IpynbToHtml || typeof IpynbToHtml.loadNotebookJson !== "function") return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var nb = IpynbToHtml.loadNotebookJson(String(reader.result || ""));
+        baseNb = nb;
+        headNb = JSON.parse(JSON.stringify(nb));
+        baseName = file.name;
+        headName = file.name;
+        sameLabel.textContent = file.name;
+        savedDiff = null;
+        lastHtml = null;
+        updateActions();
+      } catch (e) {}
+    };
+    reader.readAsText(file);
+  }
+  function wireDropZone(zone, kind) {
+    if (!zone) return;
+    ["dragenter", "dragover"].forEach(function (evName) {
+      zone.addEventListener(evName, function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = "copy";
+        zone.classList.add("dragover");
+      });
+    });
+    zone.addEventListener("dragleave", function (ev) {
+      ev.preventDefault();
+      if (!zone.contains(ev.relatedTarget)) zone.classList.remove("dragover");
+    });
+    zone.addEventListener("drop", function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      zone.classList.remove("dragover");
+      var f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+      if (!f) return;
+      if (!looksLikeNotebook(f)) return;
+      loadNotebook(f, kind);
+    });
+  }
+
+  function wirePairDropZone(zone) {
+    if (!zone) return;
+    ["dragenter", "dragover"].forEach(function (evName) {
+      zone.addEventListener(evName, function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = "copy";
+        zone.classList.add("dragover");
+      });
+    });
+    zone.addEventListener("dragleave", function (ev) {
+      ev.preventDefault();
+      if (!zone.contains(ev.relatedTarget)) zone.classList.remove("dragover");
+    });
+    zone.addEventListener("drop", function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      zone.classList.remove("dragover");
+      loadNotebookPair(ev.dataTransfer && ev.dataTransfer.files);
+    });
+  }
+
+  function wireNotesDropZone(zone) {
+    if (!zone) return;
+    ["dragenter", "dragover"].forEach(function (evName) {
+      zone.addEventListener(evName, function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = "copy";
+        zone.classList.add("dragover");
+      });
+    });
+    zone.addEventListener("dragleave", function (ev) {
+      ev.preventDefault();
+      if (!zone.contains(ev.relatedTarget)) zone.classList.remove("dragover");
+    });
+    zone.addEventListener("drop", function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      zone.classList.remove("dragover");
+      var f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+      if (!f) return;
+      if (!looksLikeNotes(f)) return;
+      loadPendingNotes(f);
+    });
+  }
+
+  function wireSameDropZone(zone) {
+    if (!zone) return;
+    ["dragenter", "dragover"].forEach(function (evName) {
+      zone.addEventListener(evName, function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = "copy";
+        zone.classList.add("dragover");
+      });
+    });
+    zone.addEventListener("dragleave", function (ev) {
+      ev.preventDefault();
+      if (!zone.contains(ev.relatedTarget)) zone.classList.remove("dragover");
+    });
+    zone.addEventListener("drop", function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      zone.classList.remove("dragover");
+      var f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+      if (!f) return;
+      if (!looksLikeNotebook(f)) return;
+      loadSameNotebook(f);
+    });
+  }
+
+  wireDropZone(dropBase, "base");
+  wireDropZone(dropHead, "head");
+  wirePairDropZone(dropPair);
+  wireNotesDropZone(dropNotes);
+  wireSameDropZone(dropSame);
+
+  baseInput.addEventListener("change", function () {
+    var f = baseInput.files && baseInput.files[0];
+    if (f) loadNotebook(f, "base");
+  });
+  headInput.addEventListener("change", function () {
+    var f = headInput.files && headInput.files[0];
+    if (f) loadNotebook(f, "head");
+  });
+  pairInput.addEventListener("change", function () {
+    loadNotebookPair(pairInput.files);
+  });
+  notesInput.addEventListener("change", function () {
+    var f = notesInput.files && notesInput.files[0];
+    if (f) loadPendingNotes(f);
+  });
+  sameInput.addEventListener("change", function () {
+    var f = sameInput.files && sameInput.files[0];
+    if (f) loadSameNotebook(f);
+  });
+  function applyRegexOptions() {
+    appliedIgnorePatterns = ignoreDeletions.value;
+    appliedIgnoreAdditionPatterns = ignoreAdditions.value;
+    lastHtml = null;
+    btnDownload.disabled = true;
+    if (regexDialog.open) regexDialog.close();
+    if (!baseNb || !headNb) return;
+    var html = maybeConvert(false);
+    if (html && !diffWorkspace.hidden) diffFrame.srcdoc = html;
+  }
+
+  function openRegexDialog() {
+    ignoreDeletions.value = appliedIgnorePatterns;
+    ignoreAdditions.value = appliedIgnoreAdditionPatterns;
+    if (typeof regexDialog.showModal === "function") regexDialog.showModal();
+    else regexDialog.setAttribute("open", "");
+    ignoreDeletions.focus();
+  }
+  window.addEventListener("message", function (event) {
+    if (event.source !== diffFrame.contentWindow) return;
+    if (!event.data || event.data.type !== "notebook-diff-open-regex") return;
+    openRegexDialog();
+  });
+  btnRegexCancel.addEventListener("click", function () {
+    ignoreDeletions.value = appliedIgnorePatterns;
+    ignoreAdditions.value = appliedIgnoreAdditionPatterns;
+    regexDialog.close();
+  });
+  btnRegexApply.addEventListener("click", applyRegexOptions);
+  regexDialog.addEventListener("cancel", function () {
+    ignoreDeletions.value = appliedIgnorePatterns;
+  });
+  btnDownload.addEventListener("click", async function () {
+    var html = maybeConvert(true);
+    if (!html) return;
+    btnDownload.disabled = true;
+    try {
+      html = await IpynbToHtml.makeHtmlSelfContained(html);
+      var blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = lastName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+    } finally {
+      btnDownload.disabled = false;
+    }
+  });
+
+  btnOpen.addEventListener("click", function () {
+    var html = maybeConvert(true);
+    if (!html) return;
+    showDiff(html, true);
+  });
+  document.getElementById("notes-allow").addEventListener("click", function () {
+    selectNotes(false);
+  });
+  document.getElementById("notes-disallow").addEventListener("click", function () {
+    selectNotes(true);
+  });
+  document.getElementById("view-nodiff").addEventListener("click", selectNoDiff);
+  document.getElementById("view-diff").addEventListener("click", selectDiff);
+})();
+  </script>
+</body>
+</html>
