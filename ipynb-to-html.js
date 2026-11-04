@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
  * Convert a Jupyter notebook (.ipynb) to an interactive annotated HTML file.
- * No npm dependencies. Generated pages inline CSS and client code from
+ * No npm dependencies. Markdown is rendered the way JupyterLab does it:
+ * vendored removeMath, then the vendored marked build, then the sanitizer.
+ * Generated pages inline those builds, plus CSS and client code from
  * notebook-styles.js, notebook-viewer.js, and notebook-diff-mode.js.
  *
  * Usage:
@@ -38,6 +40,8 @@
 
   var pageStyles = loadSibling("notebook-styles.js", "NotebookViewerStyles");
   var HtmlSanitize = loadSibling("html-sanitize.js", "HtmlSanitize");
+  var MarkedBundle = loadSibling("marked-bundle.js", "MarkedBundle");
+  var JupyterRemoveMath = loadSibling("jupyter-remove-math.js", "JupyterRemoveMath");
   var CSS = pageStyles.css;
   var CONTINUOUS_CELL_FLOW_CSS = pageStyles.flow;
   var DIFF_EXTRA_CSS = pageStyles.diff;
@@ -97,75 +101,6 @@
 
   const NOTES_META_KEY = "ipynb_to_html";
 
-  const BOLD_RE = /\*\*(.+?)\*\*|__(.+?)__/g;
-  const ITALIC_RE = /(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/g;
-
-  // Emphasis: *** / ___ → bold+italic; ** / __ → bold; * / _ → italic.
-  // Also nests _**…**_ and **_…_** via recursive interior parsing.
-  function applyEmphasisMarkers(text) {
-    function findCloser(s, from, marker, len) {
-      var i = from;
-      while (i < s.length) {
-        if (s.charAt(i) === "\n") return -1;
-        if (s.charAt(i) === marker) {
-          var run = 1;
-          while (i + run < s.length && s.charAt(i + run) === marker) run += 1;
-          if (run >= len) return i;
-          i += run;
-          continue;
-        }
-        i += 1;
-      }
-      return -1;
-    }
-    function parse(s) {
-      var out = "";
-      var i = 0;
-      while (i < s.length) {
-        var ch = s.charAt(i);
-        if (ch !== "*" && ch !== "_") {
-          out += ch;
-          i += 1;
-          continue;
-        }
-        var marker = ch;
-        var run = 1;
-        while (i + run < s.length && s.charAt(i + run) === marker) run += 1;
-        var matched = false;
-        var maxLen = run > 3 ? 3 : run;
-        for (var len = maxLen; len >= 1; len -= 1) {
-          var close = findCloser(s, i + len, marker, len);
-          if (close < 0) continue;
-          var interior = s.slice(i + len, close);
-          if (!interior.length || !interior.trim().length) continue;
-          var inner = parse(interior);
-          if (len === 3) out += "<strong><em>" + inner + "</em></strong>";
-          else if (len === 2) out += "<strong>" + inner + "</strong>";
-          else out += "<em>" + inner + "</em>";
-          i = close + len;
-          matched = true;
-          break;
-        }
-        if (!matched) {
-          out += marker;
-          i += 1;
-        }
-      }
-      return out;
-    }
-    return parse(String(text));
-  }
-
-  // Back-compat alias used by client DOM fixup / older call sites
-  function applyItalicMarkers(text) {
-    return applyEmphasisMarkers(text);
-  }
-  const LINK_RE = /\[([^\]]+)\]\(([^)]+)\)/g;
-  const IMAGE_RE = /!\[([^\]]*)\]\(([^)]+)\)/g;
-  const HEADING_RE = /^(#{1,6})\s+(.*)$/;
-  const HR_RE = /^(-{3,}|\*{3,}|_{3,})\s*$/;
-  const FENCE_RE = /^```(\w*)\s*$/;
-
   const MATH_RE =
     /(\$\$[\s\S]+?\$\$)|(\$[^\$\n]+?\$)|(\\\[[\s\S]+?\\\])|(\\\([\s\S]+?\\\))/g;
 
@@ -182,9 +117,6 @@
 
   const ANSI_ESCAPE = /\x1b\[[0-9;]*m/g;
   const HTML_TAG = /<[^>]+>/g;
-
-  const LONG_OUTPUT_LINES = 20;
-  const LONG_OUTPUT_CHARS = 2000;
 
   function escapeHtml(text) {
     return String(text)
@@ -221,354 +153,31 @@
     }
   }
 
-  function replaceAllRe(re, text, replacer) {
-    re.lastIndex = 0;
-    return String(text).replace(re, replacer);
-  }
-
-  function inlineMd(text) {
-    var tokens = [];
-    var i = 0;
-    while (i < text.length) {
-      if (text[i] === "`") {
-        var j = text.indexOf("`", i + 1);
-        if (j !== -1) {
-          tokens.push(["code", text.slice(i + 1, j)]);
-          i = j + 1;
-          continue;
-        }
+  var markedParseFn = null;
+  function markedParse(src) {
+    if (!markedParseFn) {
+      var api = null;
+      if (typeof require === "function") {
+        try { api = require("./marked.umd.js"); } catch (e) { api = null; }
       }
-      var nextBt = text.indexOf("`", i);
-      if (nextBt === -1) {
-        tokens.push(["text", text.slice(i)]);
-        break;
-      }
-      tokens.push(["text", text.slice(i, nextBt)]);
-      i = nextBt;
+      if (!api && typeof globalThis !== "undefined") api = globalThis.marked;
+      if (!api || typeof api.parse !== "function")
+        throw new Error("Load marked.umd.js before ipynb-to-html.js");
+      markedParseFn = function (markdown) {
+        return api.parse(markdown, { async: false, gfm: true, breaks: false });
+      };
     }
-
-    var out = [];
-    for (var ti = 0; ti < tokens.length; ti++) {
-      var kind = tokens[ti][0];
-      var val = tokens[ti][1];
-      if (kind === "code") {
-        out.push("<code>" + escapeHtml(val) + "</code>");
-        continue;
-      }
-      val = replaceAllRe(IMAGE_RE, val, function (_m, alt, src) {
-        var url = HtmlSanitize.safeUrl(src, "image");
-        if (!url) return escapeHtml(alt);
-        return '<img alt="' + escapeHtml(alt) + '" src="' + escapeHtml(url) + '">';
-      });
-      val = replaceAllRe(LINK_RE, val, function (_m, label, href) {
-        var url = HtmlSanitize.safeUrl(href, "link");
-        if (!url) return escapeHtml(label);
-        return '<a href="' + escapeHtml(url) + '">' + escapeHtml(label) + "</a>";
-      });
-      // Links/images first; then unified emphasis on plain segments (*** / ___ / ** / __ / * / _)
-      var pieces = val.split(/(<\/?(?:a|img|code)\b[^>]*>)/);
-      var rebuilt = [];
-      for (var pi = 0; pi < pieces.length; pi++) {
-        var p = pieces[pi];
-        if (p.charAt(0) === "<") {
-          rebuilt.push(p);
-        } else {
-          var p2 = applyEmphasisMarkers(p);
-          var sub = p2.split(/(<\/?(?:strong|em)>)/);
-          for (var si = 0; si < sub.length; si++) {
-            var part = sub[si];
-            if (
-              part === "<em>" || part === "</em>" ||
-              part === "<strong>" || part === "</strong>"
-            ) rebuilt.push(part);
-            else rebuilt.push(escapeHtml(part));
-          }
-        }
-      }
-      out.push(rebuilt.join(""));
-    }
-    return out.join("");
+    var html = markedParseFn(src);
+    if (html && typeof html.then === "function")
+      throw new Error("marked.parse returned a promise");
+    return String(html || "");
   }
 
-  function extractMath(src) {
-    var maths = [];
-    MATH_RE.lastIndex = 0;
-    var out = String(src).replace(MATH_RE, function (m) {
-      maths.push(m);
-      return "@@MATH" + (maths.length - 1) + "@@";
-    });
-    return { text: out, maths: maths };
-  }
-
-  function restoreMath(htmlFrag, maths) {
-    var out = htmlFrag;
-    for (var i = 0; i < maths.length; i++) {
-      var raw = maths[i];
-      out = out.split("@@MATH" + i + "@@").join(
-        '<span class="tex-math" data-tex="' +
-          escapeHtml(raw) +
-          '">' +
-          escapeHtml(raw) +
-          "</span>"
-      );
-    }
-    return out;
-  }
-
+  // Same pipeline as JupyterLab: removeMath, parse GFM with marked, sanitize.
   function markdownToHtml(src) {
-    var extracted = extractMath(src);
-    src = extracted.text;
-    var maths = extracted.maths;
-    var lines = src.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-    var htmlParts = [];
-    var i = 0;
-    var para = [];
-
-    function lineHasHardBreak(line) {
-      return / {2,}$/.test(line);
-    }
-
-    function renderInlines(parts) {
-      var rendered = [];
-      for (var k = 0; k < parts.length; k++) {
-        var text = String(parts[k].text || "").replace(/^[ \t]+|[ \t]+$/g, "");
-        if (!text) continue;
-        rendered.push({ html: inlineMd(text), hard: !!parts[k].hard });
-      }
-      var bits = [];
-      for (var r = 0; r < rendered.length; r++) {
-        if (r > 0) bits.push(rendered[r - 1].hard ? "<br>" : " ");
-        bits.push(rendered[r].html);
-      }
-      return bits.join("");
-    }
-
-    function flushPara() {
-      if (!para.length) return;
-      var html = renderInlines(para);
-      if (html) htmlParts.push("<p>" + html + "</p>");
-      para = [];
-    }
-
-    function leadingWs(line) {
-      var n = 0;
-      while (n < line.length && (line.charAt(n) === " " || line.charAt(n) === "\t")) n++;
-      return n;
-    }
-
-    function parseMarker(line) {
-      var m = /^(\s*)([-*+]|\d+\.)[ \t]+(.*)$/.exec(line);
-      if (!m) return null;
-      var indent = m[1].length;
-      var bullet = m[2];
-      var type = /^\d+\.$/.test(bullet) ? "ol" : "ul";
-      var after = indent + bullet.length;
-      var sep = 0;
-      while (
-        after + sep < line.length &&
-        (line.charAt(after + sep) === " " || line.charAt(after + sep) === "\t")
-      ) sep++;
-      return {
-        indent: indent,
-        type: type,
-        bullet: bullet,
-        number: type === "ol" ? parseInt(bullet, 10) : null,
-        content: line.slice(after + sep).replace(/[ \t]+$/g, ""),
-        contentCol: after + sep,
-        hard: lineHasHardBreak(line),
-      };
-    }
-
-    function isSibling(marker, list) {
-      if (!marker || marker.type !== list.type) return false;
-      if (list.type === "ul" && marker.bullet !== list.bullet) return false;
-      if (marker.indent < list.indent || marker.indent > list.indent + 3) return false;
-      if (list.items.length && marker.indent >= list.items[list.items.length - 1].contentCol)
-        return false;
-      return true;
-    }
-
-    function isTopInterrupt(line) {
-      return FENCE_RE.test(line) || HEADING_RE.test(line) || HR_RE.test(line);
-    }
-
-    function stripIndent(line, col) {
-      var at = 0;
-      var n = 0;
-      while (at < line.length && n < col && (line.charAt(at) === " " || line.charAt(at) === "\t")) {
-        at++;
-        n++;
-      }
-      return line.slice(at).replace(/[ \t]+$/g, "");
-    }
-
-    function nextNonBlank(from) {
-      var k = from;
-      while (k < lines.length && !String(lines[k] || "").trim()) k++;
-      return k;
-    }
-
-    function lineBelongsToItem(line, item, afterBlank) {
-      if (!line || !String(line).trim()) return false;
-      var indent = leadingWs(line);
-      var marker = parseMarker(line);
-      if (marker && marker.indent >= item.contentCol) return true;
-      if (indent >= item.contentCol && !isTopInterrupt(line)) return true;
-      if (isTopInterrupt(line)) return false;
-      if (marker && marker.indent < item.contentCol) return false;
-      if (afterBlank) return false;
-      return true;
-    }
-
-    function renderList(list) {
-      var open = "<" + list.type + ">";
-      if (list.type === "ol" && list.start !== 1)
-        open = '<ol start="' + list.start + '">';
-      var parts = [open];
-      for (var n = 0; n < list.items.length; n++)
-        parts.push("<li>" + renderItem(list.items[n], list.loose) + "</li>");
-      parts.push("</" + list.type + ">");
-      return parts.join("\n");
-    }
-
-    function renderItem(item, loose) {
-      var parts = [];
-      for (var b = 0; b < item.blocks.length; b++) {
-        var block = item.blocks[b];
-        if (block.type === "list") {
-          parts.push(renderList(block.list));
-          continue;
-        }
-        var inner = renderInlines(block.lines);
-        if (!inner) continue;
-        parts.push(loose ? "<p>" + inner + "</p>" : inner);
-      }
-      return parts.join("\n");
-    }
-
-    function parseList(startIndex) {
-      var first = parseMarker(lines[startIndex]);
-      var list = {
-        type: first.type,
-        bullet: first.bullet,
-        indent: first.indent,
-        start: first.number || 1,
-        items: [],
-        loose: false,
-      };
-      var idx = startIndex;
-      while (idx < lines.length) {
-        if (!String(lines[idx] || "").trim()) {
-          var k = nextNonBlank(idx);
-          var ahead = k < lines.length ? parseMarker(lines[k]) : null;
-          if (!isSibling(ahead, list)) break;
-          list.loose = true;
-          idx = k;
-          continue;
-        }
-        var marker = parseMarker(lines[idx]);
-        if (!isSibling(marker, list)) break;
-        var item = { contentCol: marker.contentCol, blocks: [] };
-        var pLines = [];
-        if (marker.content) pLines.push({ text: marker.content, hard: marker.hard });
-        idx++;
-        var pendingBlank = false;
-        while (idx < lines.length) {
-          var line = lines[idx];
-          if (!String(line || "").trim()) {
-            var k2 = nextNonBlank(idx);
-            if (k2 >= lines.length || !lineBelongsToItem(lines[k2], item, true)) break;
-            pendingBlank = true;
-            idx = k2;
-            continue;
-          }
-          if (!lineBelongsToItem(line, item, pendingBlank)) break;
-          var nested = parseMarker(line);
-          if (nested && nested.indent >= item.contentCol) {
-            if (pLines.length) item.blocks.push({ type: "p", lines: pLines });
-            pLines = [];
-            if (pendingBlank) list.loose = true;
-            var sub = parseList(idx);
-            if (sub.list.items.length) item.blocks.push({ type: "list", list: sub.list });
-            if (sub.next <= idx) break;
-            idx = sub.next;
-            pendingBlank = false;
-            continue;
-          }
-          var text = leadingWs(line) >= item.contentCol
-            ? stripIndent(line, item.contentCol)
-            : String(line).replace(/^[ \t]+|[ \t]+$/g, "");
-          if (pendingBlank && pLines.length) {
-            item.blocks.push({ type: "p", lines: pLines });
-            pLines = [];
-            list.loose = true;
-          }
-          pendingBlank = false;
-          if (text) pLines.push({ text: text, hard: lineHasHardBreak(line) });
-          idx++;
-        }
-        if (pLines.length) item.blocks.push({ type: "p", lines: pLines });
-        list.items.push(item);
-      }
-      return { list: list, next: idx };
-    }
-
-    while (i < lines.length) {
-      var line = lines[i];
-      var fence = FENCE_RE.exec(line);
-      if (fence) {
-        flushPara();
-        var lang = fence[1] || "";
-        i += 1;
-        var codeLines = [];
-        while (i < lines.length && !FENCE_RE.test(lines[i])) {
-          codeLines.push(lines[i]);
-          i += 1;
-        }
-        if (i < lines.length) i += 1;
-        var cls = lang ? ' class="language-' + escapeHtml(lang) + '"' : "";
-        htmlParts.push(
-          "<pre><code" + cls + ">" + escapeHtml(codeLines.join("\n")) + "</code></pre>"
-        );
-        continue;
-      }
-      if (!line.trim()) {
-        flushPara();
-        i += 1;
-        continue;
-      }
-      var hm = HEADING_RE.exec(line);
-      if (hm) {
-        flushPara();
-        var level = hm[1].length;
-        htmlParts.push("<h" + level + ">" + inlineMd(hm[2].trim()) + "</h" + level + ">");
-        i += 1;
-        continue;
-      }
-      if (HR_RE.test(line)) {
-        flushPara();
-        htmlParts.push("<hr>");
-        i += 1;
-        continue;
-      }
-      var marker = parseMarker(line);
-      if (marker) {
-        flushPara();
-        var parsed = parseList(i);
-        if (!parsed.list.items.length || parsed.next <= i) {
-          para.push({ text: line.trim(), hard: lineHasHardBreak(line) });
-          i += 1;
-          continue;
-        }
-        htmlParts.push(renderList(parsed.list));
-        i = parsed.next;
-        continue;
-      }
-      para.push({ text: line.trim(), hard: lineHasHardBreak(line) });
-      i += 1;
-    }
-    flushPara();
-    return restoreMath(htmlParts.join("\n"), maths);
+    var extracted = JupyterRemoveMath.removeMath(String(src || ""));
+    var html = HtmlSanitize.sanitizeHtml(markedParse(extracted.text));
+    return JupyterRemoveMath.restoreMathSpans(html, extracted.math, escapeHtml);
   }
 
   function tokenStyleMap(code) {
@@ -591,29 +200,6 @@
 
   function highlightPython(code) {
     return renderStyledPlain(code, tokenStyleMap(code), []);
-  }
-
-  function isLongText(text) {
-    if (text.length > LONG_OUTPUT_CHARS) return true;
-    var lines = (text.match(/\n/g) || []).length + (text ? 1 : 0);
-    return lines > LONG_OUTPUT_LINES;
-  }
-
-  function wrapLongOutput(innerHtml, plainForMeasure, kind) {
-    kind = kind || "output";
-    if (!isLongText(plainForMeasure)) return innerHtml;
-    var nLines =
-      (plainForMeasure.match(/\n/g) || []).length + (plainForMeasure ? 1 : 0);
-    var nChars = plainForMeasure.length;
-    var summary =
-      "Show long " + kind + " (" + nLines + " lines, " + nChars + " chars)";
-    return (
-      '<details class="long-output"><summary>' +
-      escapeHtml(summary) +
-      "</summary>" +
-      innerHtml +
-      "</details>"
-    );
   }
 
   function clampOpacity(value, label) {
@@ -1850,6 +1436,12 @@
     return n != null ? String(n) : " ";
   }
 
+  var maxPromptChars = 0;
+  function notePromptWidth(text) {
+    var n = String(text == null ? "" : text).length;
+    if (n > maxPromptChars) maxPromptChars = n;
+  }
+
   function stripHtmlTags(text) {
     return String(text).replace(HTML_TAG, "");
   }
@@ -1870,7 +1462,7 @@
     if (otype === "execute_result" || otype === "display_data") {
       var data = output.data || {};
       if (data["text/html"] != null)
-        return stripHtmlTags(joinText(data["text/html"]));
+        return HtmlSanitize.visibleHtmlText(joinText(data["text/html"]));
       if (data["text/plain"] != null) return joinText(data["text/plain"]);
       return "";
     }
@@ -1896,9 +1488,8 @@
       );
     }
 
-    function row(promptHtml, bodyHtml, measure, kind) {
-      var wrapped = wrapLongOutput(bodyHtml, measure, kind);
-      return '<div class="output-row">' + promptHtml + wrapped + "</div>";
+    function row(promptHtml, bodyHtml) {
+      return '<div class="output-row">' + promptHtml + bodyHtml + "</div>";
     }
 
     if (otype === "stream") {
@@ -1906,15 +1497,14 @@
       var name = output.name || "stdout";
       var cls = name === "stderr" ? "stderr" : "stdout";
       var prompt = name === "stderr" ? "err" : "out";
+      notePromptWidth("[" + prompt + "]");
       var inner = matched.length
         ? renderPlainWithNotes(raw, matched)
         : escapeHtml(raw);
       var body = "<div " + annotAttrs(cls) + ">" + inner + "</div>";
       return row(
         '<div class="prompt ' + prompt + '">[' + prompt + "]</div>",
-        body,
-        raw,
-        "stream"
+        body
       );
     }
 
@@ -1922,6 +1512,7 @@
       var data = output.data || {};
       var promptN = output.execution_count;
       var label = promptN != null ? String(promptN) : String(outputIndex);
+      notePromptWidth("Out[" + label + "]:");
       var promptHtml =
         '<div class="prompt out">Out[' + escapeHtml(label) + "]:</div>";
       if (data["text/html"] != null) {
@@ -1934,7 +1525,7 @@
           );
         }
         body = "<div " + annotAttrs("html-out") + ">" + rawHtml + "</div>";
-        return row(promptHtml, body, rawHtml, "html output");
+        return row(promptHtml, body);
       }
       if (data["image/png"] != null) {
         body = HtmlSanitize.rasterImageHtml("image/png", joinText(data["image/png"]));
@@ -1948,7 +1539,7 @@
       if (data["image/svg+xml"] != null) {
         var svg = joinText(data["image/svg+xml"]);
         body = HtmlSanitize.svgImageHtml(svg);
-        return row(promptHtml, body, svg, "svg output");
+        return row(promptHtml, body);
       }
       if (data["text/plain"] != null) {
         raw = joinText(data["text/plain"]);
@@ -1956,12 +1547,12 @@
           ? renderPlainWithNotes(raw, matched)
           : escapeHtml(raw);
         body = "<div " + annotAttrs() + ">" + inner + "</div>";
-        return row(promptHtml, body, raw, "text output");
+        return row(promptHtml, body);
       }
       raw =
         "(unsupported output: " + Object.keys(data).join(", ") + ")";
       body = '<div class="output-body">' + escapeHtml(raw) + "</div>";
-      return row(promptHtml, body, raw, "output");
+      return row(promptHtml, body);
     }
 
     if (otype === "error") {
@@ -1970,13 +1561,15 @@
         ? renderPlainWithNotes(raw, matched)
         : escapeHtml(raw);
       body = "<div " + annotAttrs("error") + ">" + inner + "</div>";
-      return row('<div class="prompt err">err</div>', body, raw, "traceback");
+      notePromptWidth("err");
+      return row('<div class="prompt err">err</div>', body);
     }
 
     raw = JSON.stringify(output, null, 2);
     body =
       '<div class="output-body">' + escapeHtml(raw.slice(0, 2000)) + "</div>";
-    return row('<div class="prompt out">?</div>', body, raw, "output");
+    notePromptWidth("?");
+    return row('<div class="prompt out">?</div>', body);
   }
 
 
@@ -2297,8 +1890,8 @@
     var diffCls = diffStatusClass(diff);
 
     if (synth && synth.synthetic === "output") {
-      // Prefer the real output object so figures / HTML / long-output collapse
-      // go through renderOutput — no plain-text synthetic <pre> path.
+      // Prefer the real output object so figures and HTML go through
+      // renderOutput — no plain-text synthetic <pre> path.
       var outObj =
         synth.output && typeof synth.output === "object"
           ? synth.output
@@ -2425,6 +2018,7 @@
         ? matchCellSourceAnchors(codeAdditions.source, allNotes, cellId)
         : [];
       var ec = executionCount(cell);
+      notePromptWidth("In[" + ec + "]:");
       var blocks = [
         '<div class="input-row">',
         '<div class="prompt in">In[' + escapeHtml(ec) + "]:</div>",
@@ -2487,6 +2081,7 @@
   }
 
   function convertNotebookToHtml(nb, options) {
+    maxPromptChars = 0;
     options = options || {};
     var title = options.title != null ? options.title : "notebook";
     var sourceName = options.sourceName != null ? options.sourceName : "notebook.ipynb";
@@ -2603,6 +2198,8 @@
       "window.HtmlSanitize = " +
       HtmlSanitize.factorySource.replace(/<\/script/gi, "<\\/script") +
       ";\n";
+    var markedBoot = String(MarkedBundle.source || "").replace(/<\/script/gi, "<\\/script");
+    var removeMathBoot = String(JupyterRemoveMath.source || "").replace(/<\/script/gi, "<\\/script");
     var notebookDiff =
       meta[NOTES_META_KEY] &&
       meta[NOTES_META_KEY].diff &&
@@ -2626,6 +2223,7 @@
       CONTINUOUS_CELL_FLOW_CSS +
       "\n::highlight(pending-note-selections){background:rgba(255,229,102,.72);color:inherit}" +
       (notebookDiff ? DIFF_EXTRA_CSS : "") +
+      (maxPromptChars ? "\n:root{--prompt-chars:" + maxPromptChars + "}" : "") +
       "</style>\n" +
       "</head>\n" +
       "<body" + (allowNotes ? "" : ' data-allow-notes="false"') + ">\n" +
@@ -2664,7 +2262,7 @@
       '      <button type="button" class="sel-more" id="btn-make-note-more" title="Other anchor types">...</button>\n' +
       '    </div>\n' +
       '    <div class="sel-action">\n' +
-      '      <button type="button" id="btn-select-another">Several anchors</button>\n' +
+      '      <button type="button" id="btn-select-another">Select first anchor</button>\n' +
       '      <button type="button" class="sel-more" id="btn-select-another-more" title="Other anchor types">...</button>\n' +
       '    </div>\n' +
       '    <div class="sel-action">\n' +
@@ -2786,6 +2384,12 @@
       "<script>\n" +
       sanitizeBoot +
       "</script>\n" +
+      "<script>\n" +
+      markedBoot +
+      "\n</script>\n" +
+      "<script>\n" +
+      removeMathBoot +
+      "\n</script>\n" +
       "<script>\n" +
       INTERACTIVE_JS_WITH_DIFF_SUPPORT +
       "\n</script>\n" +

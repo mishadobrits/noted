@@ -32,11 +32,20 @@
     "border-collapse": 1, "border-color": 1, "border-left": 1, "border-right": 1,
     "border-spacing": 1, "border-top": 1, "caption-side": 1, color: 1,
     display: 1, "empty-cells": 1, "font-size": 1, "font-style": 1, "font-weight": 1,
-    height: 1, "line-height": 1, "list-style-type": 1, margin: 1, "max-width": 1,
-    "min-width": 1, "overflow-wrap": 1, padding: 1, "padding-bottom": 1,
-    "padding-left": 1, "padding-right": 1, "padding-top": 1, "text-align": 1,
-    "text-decoration": 1, "vertical-align": 1, "white-space": 1, width: 1,
-    "word-break": 1
+    height: 1, "line-height": 1, "list-style": 1, "list-style-position": 1,
+    "margin-top": 1, "margin-right": 1, "margin-bottom": 1, "margin-left": 1,
+    "list-style-type": 1, margin: 1, "max-width": 1, "min-width": 1,
+    opacity: 1, overflow: 1, "overflow-wrap": 1, "overflow-x": 1, "overflow-y": 1,
+    padding: 1, "padding-bottom": 1, "padding-left": 1, "padding-right": 1,
+    "padding-top": 1, "text-align": 1, "text-decoration": 1,
+    "text-decoration-color": 1, "text-decoration-thickness": 1,
+    "text-underline-offset": 1, "text-transform": 1,
+    "vertical-align": 1, "white-space": 1, width: 1, "word-break": 1,
+    "align-items": 1, "align-self": 1, "justify-content": 1,
+    flex: 1, "flex-basis": 1, "flex-direction": 1, "flex-grow": 1,
+    "flex-shrink": 1, "flex-wrap": 1, gap: 1, "column-gap": 1, "row-gap": 1,
+    "box-sizing": 1, "box-shadow": 1, "border-radius": 1, "letter-spacing": 1,
+    "font-family": 1, float: 1, clear: 1
   };
 
   function escapeHtml(text) {
@@ -65,6 +74,7 @@
       .replace(/&quot;/gi, '"')
       .replace(/&apos;/gi, "'")
       .replace(/&#39;/g, "'")
+      .replace(/&nbsp;/gi, "\u00a0")
       .replace(/&amp;/gi, "&");
   }
 
@@ -120,7 +130,8 @@
       if (colon < 1) continue;
       var prop = decl.slice(0, colon).replace(/^\s+|\s+$/g, "").toLowerCase();
       var cssValue = decl.slice(colon + 1).replace(/^\s+|\s+$/g, "");
-      if (!STYLE_PROPS[prop] || !cssValue || cssValue.length > 160) continue;
+      cssValue = cssValue.replace(/\s*!important\s*$/i, "").replace(/\s+$/g, "");
+      if (!STYLE_PROPS[prop] || !cssValue || cssValue.length > 240) continue;
       if (!/^[#a-zA-Z0-9(),.%\s'"+-]+$/.test(cssValue)) continue;
       out.push(prop + ": " + cssValue);
     }
@@ -215,6 +226,59 @@
     return attrs.join("");
   }
 
+  function attrList(raw) {
+    var attrs = [];
+    var i = 0;
+    var n = raw.length;
+    while (i < n) {
+      while (i < n && /[\s/]/.test(raw.charAt(i))) i++;
+      if (i >= n) break;
+      if (!/[A-Za-z_:]/.test(raw.charAt(i))) { i++; continue; }
+      var start = i;
+      while (i < n && /[A-Za-z0-9_:-]/.test(raw.charAt(i))) i++;
+      var name = raw.slice(start, i).toLowerCase();
+      while (i < n && /\s/.test(raw.charAt(i))) i++;
+      var value = "";
+      if (raw.charAt(i) === "=") {
+        i++;
+        while (i < n && /\s/.test(raw.charAt(i))) i++;
+        var quote = raw.charAt(i);
+        if (quote === '"' || quote === "'") {
+          i++;
+          var valueStart = i;
+          while (i < n && raw.charAt(i) !== quote) i++;
+          value = raw.slice(valueStart, i);
+          if (i < n) i++;
+        } else {
+          valueStart = i;
+          while (i < n && !/[\s>]/.test(raw.charAt(i)) && raw.charAt(i) !== "/") i++;
+          value = raw.slice(valueStart, i);
+        }
+      }
+      attrs.push({ name: name, value: value });
+    }
+    return attrs;
+  }
+
+  // GFM task lists. Only a disabled checkbox is kept, so the control cannot be edited.
+  function checkboxInputHtml(raw) {
+    var attrs = attrList(raw);
+    var type = "";
+    var checked = false;
+    var disabled = false;
+    for (var i = 0; i < attrs.length; i++) {
+      var name = attrs[i].name;
+      if (name === "type") {
+        if (type) return "";
+        type = String(attrs[i].value || "").toLowerCase();
+      } else if (name === "checked") checked = true;
+      else if (name === "disabled") disabled = true;
+      else return "";
+    }
+    if (type !== "checkbox" || !disabled) return "";
+    return "<input disabled" + (checked ? " checked" : "") + ' type="checkbox">';
+  }
+
   function sanitizeHtml(input) {
     var html = String(input || "");
     var out = [];
@@ -280,6 +344,17 @@
         }
         continue;
       }
+      if (tag === "br") {
+        out.push("<br>");
+        continue;
+      }
+      if (tag === "input") {
+        if (!closing) {
+          var box = checkboxInputHtml(rawAttrs);
+          if (box) out.push(box);
+        }
+        continue;
+      }
       if (closing) {
         if (ALLOWED[tag] && !VOID[tag]) out.push("</" + tag + ">");
         continue;
@@ -307,6 +382,31 @@
       ' output" src="data:image/' + subtype + ";base64," + b64 + '"></div>';
   }
 
+  // Text the browser shows for sanitized notebook HTML. Dropped elements such
+  // as style, script, and svg contribute nothing, and entities are decoded.
+  function visibleHtmlText(input) {
+    var html = sanitizeHtml(input);
+    var parts = [];
+    var i = 0;
+    var n = html.length;
+    while (i < n) {
+      if (html.charAt(i) !== "<") {
+        var next = html.indexOf("<", i);
+        if (next < 0) next = n;
+        parts.push(decodeEntities(html.slice(i, next)));
+        i = next;
+        continue;
+      }
+      var end = html.indexOf(">", i);
+      if (end < 0) {
+        parts.push(decodeEntities(html.slice(i)));
+        break;
+      }
+      i = end + 1;
+    }
+    return parts.join("");
+  }
+
   function svgImageHtml(svg) {
     var text = String(svg || "");
     if (!text.replace(/^\s+|\s+$/g, "")) {
@@ -322,6 +422,7 @@
     safeHexColor: safeHexColor,
     safeUrl: safeUrl,
     sanitizeHtml: sanitizeHtml,
+    visibleHtmlText: visibleHtmlText,
     rasterImageHtml: rasterImageHtml,
     svgImageHtml: svgImageHtml
   };

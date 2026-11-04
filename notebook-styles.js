@@ -29,6 +29,12 @@
   --radius: 6px;
   --notes-rail-width: 17rem;
   --notes-rail-gap: 0.75rem;
+  /* Widest In/Out/err in this notebook, set as --prompt-chars when the page is built. */
+  --prompt-pad-left: 0.4rem;
+  --prompt-chars: 6;
+  --prompt-col: calc(var(--prompt-pad-left) + var(--prompt-chars) * 1ch);
+  --prompt-gap: 0.5rem;
+  --source-pad-x: 1rem;
   /* Cell width like c4ae8f7 (page max 96rem minus one notes rail + gap); notes still grow right */
   --page-max: 96rem;
   --cell-column-width: min(
@@ -246,7 +252,21 @@ header.doc-header .meta {
   border-radius: var(--radius);
 }
 .cell-body { padding: 0.55rem 0.65rem 0.65rem; min-width: 0; }
-.cell-md .cell-body { padding: 0.75rem 1rem; }
+/* Leave room under a collapsed button so its rounded corners stay visible. */
+.cell-body:has(> .outputs > .output-collapse.is-long:not(.is-open)),
+.cell-body:has(> .output-collapse.is-long:not(.is-open)) {
+  padding-bottom: 0.45rem;
+}
+/* Drop the inset before In/Out so the code column picks up that width. */
+.cell-code .cell-body,
+.cell-synthetic-output .cell-body { padding-left: 0; }
+/* White markdown cell stays full width; its text lines up with the code.
+   Prompt font here so 1ch in --prompt-col matches the In/Out labels. */
+.cell-md .cell-body {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  padding: 5px 0 5px calc(var(--prompt-col) + var(--prompt-gap) + var(--source-pad-x));
+}
 .tex-math { white-space: pre-wrap; }
 /* Inline vs display after KaTeX auto-render */
 .md-rendered .tex-math > .katex { display: inline; }
@@ -257,79 +277,184 @@ header.doc-header .meta {
   text-align: center;
 }
 
-/* Jupyter-like markdown heading sizes (nbconvert / classic notebook) */
-.cell-md h1, .cell-md h2, .cell-md h3, .cell-md h4, .cell-md h5, .cell-md h6 {
-  color: inherit;
-  font-weight: bold;
-  line-height: 1.2;
-  margin: 0.8em 0 0.4em;
+/* Markdown cells follow JupyterLab rendered HTML. Note cards stay compact. */
+.cell-md .md-rendered {
+  color: rgba(0, 0, 0, 0.87);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+  font-size: 14px;
+  line-height: 1.6;
+  padding-right: 20px;
 }
-.cell-md h1 { font-size: 1.857em; margin-top: 1.08em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
-.cell-md h2 { font-size: 1.571em; margin-top: 1.0em; padding-bottom: 0.25em; border-bottom: 1px solid var(--border); }
-.cell-md h3 { font-size: 1.286em; }
-.cell-md h4 { font-size: 1.143em; }
-.cell-md h5 { font-size: 1.0em; }
-.cell-md h6 { font-size: 1.0em; font-style: italic; color: var(--muted); }
-.cell-md h1:first-child, .cell-md h2:first-child, .cell-md h3:first-child { margin-top: 0; }
-
-/* Italics inside headings (markdown _…_ / *…*) must stay visible */
-.cell-md :is(h1, h2, h3, h4, h5, h6) em,
-.cell-md :is(h1, h2, h3, h4, h5, h6) i,
+.cell-md .md-rendered em { font-style: italic; }
+.cell-md .md-rendered strong { font-weight: bold; }
+.cell-md .md-rendered u { text-decoration: underline; }
+.cell-md .md-rendered a:link { color: #0d47a1; text-decoration: none; }
+.cell-md .md-rendered a:hover { text-decoration: underline; }
+.cell-md .md-rendered a:visited { color: #7b1fa2; text-decoration: none; }
+.cell-md .md-rendered h1,
+.cell-md .md-rendered h2,
+.cell-md .md-rendered h3,
+.cell-md .md-rendered h4,
+.cell-md .md-rendered h5,
+.cell-md .md-rendered h6 {
+  color: inherit;
+  font-weight: 500;
+  font-style: normal;
+  line-height: 1;
+  margin: 1.2em 0 0.8em;
+}
+.cell-md .md-rendered h1 { font-size: 2.0736em; }
+.cell-md .md-rendered h2 { font-size: 1.728em; }
+.cell-md .md-rendered h3 { font-size: 1.44em; }
+.cell-md .md-rendered h4 { font-size: 1.2em; }
+.cell-md .md-rendered h5 { font-size: 1em; }
+.cell-md .md-rendered h6 { font-size: 0.83333em; }
+.cell-md .md-rendered :is(h1, h2, h3, h4, h5, h6):first-child { margin-top: 0.6em; }
+.cell-md .md-rendered :is(h1, h2, h3, h4, h5, h6):last-child { margin-bottom: 0.4em; }
+.cell-md .md-rendered :is(h1, h2, h3, h4, h5, h6) em,
+.cell-md .md-rendered :is(h1, h2, h3, h4, h5, h6) i,
 .note-card-body.md-note :is(h1, h2, h3, h4, h5, h6) em,
 .note-card-body.md-note :is(h1, h2, h3, h4, h5, h6) i {
   font-style: italic;
   font-weight: inherit;
 }
-
-.cell-md p { margin: 0.6em 0; }
-.cell-md ul, .cell-md ol { margin: 0.5em 0 0.5em 1.4em; }
-.cell-md li > p:first-child { margin-top: 0; }
-.cell-md li > p:last-child { margin-bottom: 0; }
-.cell-md li > ul, .cell-md li > ol { margin-top: 0.25em; margin-bottom: 0.25em; }
-.cell-md code {
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.88em;
-  background: #f0f0f0;
-  padding: 0.1em 0.35em;
-  border-radius: 3px;
+.cell-md .md-rendered p { text-align: left; margin: 0 0 1em; }
+.cell-md .md-rendered ul,
+.cell-md .md-rendered ol { padding-left: 2em; margin: 0 0 1em; }
+.cell-md .md-rendered ul { list-style: disc; }
+.cell-md .md-rendered ul ul { list-style: square; }
+.cell-md .md-rendered ul ul ul { list-style: circle; }
+.cell-md .md-rendered ol { list-style: decimal; }
+.cell-md .md-rendered ol ol { list-style: upper-alpha; }
+.cell-md .md-rendered ol ol ol { list-style: lower-alpha; }
+.cell-md .md-rendered ol ol ol ol { list-style: lower-roman; }
+.cell-md .md-rendered ul ul,
+.cell-md .md-rendered ul ol,
+.cell-md .md-rendered ol ul,
+.cell-md .md-rendered ol ol { margin-bottom: 0; }
+.cell-md .md-rendered hr {
+  border: 0;
+  height: 1px;
+  background: #bdbdbd;
+  margin: 1em 0;
 }
-.cell-md pre {
-  background: var(--code-bg);
-  color: var(--code-fg);
-  border: 1px solid var(--code-border);
-  padding: 0.9rem 1rem;
-  overflow-x: auto;
-  border-radius: var(--radius);
-  font-size: 0.88rem;
-  white-space: pre;
+.cell-md .md-rendered > pre { margin: 1.5em 2em; }
+.cell-md .md-rendered pre,
+.cell-md .md-rendered code {
+  border: 0;
+  background: #fff;
+  color: rgba(0, 0, 0, 0.87);
+  font-family: Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  font-size: inherit;
+  line-height: 1.3077;
+  padding: 0;
+  white-space: pre-wrap;
 }
-.cell-md pre code {
-  background: none; padding: 0; color: inherit; white-space: inherit; display: block;
+.cell-md .md-rendered :not(pre) > code {
+  background: #eee;
+  padding: 1px 5px;
+  border-radius: 2px;
 }
-.cell-md a { color: var(--md-accent); }
+.cell-md .md-rendered pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+  white-space: inherit;
+  display: block;
+}
+.cell-md .md-rendered table {
+  border-collapse: collapse;
+  border-spacing: 0;
+  border: none;
+  color: rgba(0, 0, 0, 0.87);
+  font-size: 13px;
+  table-layout: fixed;
+  margin: 0 auto 1em;
+}
+.cell-md .md-rendered thead {
+  border-bottom: 1px solid #bdbdbd;
+  vertical-align: bottom;
+}
+.cell-md .md-rendered td,
+.cell-md .md-rendered th,
+.cell-md .md-rendered tr {
+  vertical-align: middle;
+  padding: 0.5em;
+  line-height: normal;
+  white-space: normal;
+  max-width: none;
+  border: none;
+}
+.cell-md .md-rendered th { font-weight: bold; }
+.cell-md .md-rendered tbody tr:nth-child(odd) { background: #fff; }
+.cell-md .md-rendered tbody tr:nth-child(even) { background: #f5f5f5; }
+.cell-md .md-rendered tbody tr:hover { background: #e1f5fe; }
+.cell-md .md-rendered blockquote {
+  margin: 1em 2em;
+  padding: 0 1em;
+  border-left: 5px solid #e0e0e0;
+}
+.cell-md .md-rendered img { max-width: 100%; height: auto; }
+.cell-md .md-rendered > img { display: block; margin: 0 0 1em; }
+.cell-md .md-rendered input[type="checkbox"] {
+  margin: 0 0.35em 0 0;
+  vertical-align: middle;
+}
+.cell-md .md-rendered > *:last-child { margin-bottom: 0.5em; }
+.note-card-body.md-note table {
+  border-collapse: collapse;
+  border-spacing: 0;
+  margin: 0.6em 0;
+  border: none;
+}
+.note-card-body.md-note thead {
+  border-bottom: 1px solid var(--border);
+  vertical-align: bottom;
+}
+.note-card-body.md-note th,
+.note-card-body.md-note td {
+  padding: 0.4em 0.6em;
+  border: none;
+  vertical-align: middle;
+}
+.note-card-body.md-note th { font-weight: 700; }
+.note-card-body.md-note tbody tr:nth-child(odd) { background: #f6f7f9; }
+.note-card-body.md-note blockquote {
+  margin: 0.6em 0 0.6em 0.15em;
+  padding: 0 0.8em;
+  border-left: 4px solid var(--border);
+}
+.note-card-body.md-note input[type="checkbox"] {
+  margin: 0 0.35em 0 0;
+  vertical-align: middle;
+}
 .md-rendered.annotatable {
   cursor: text;
 }
 .cell-code .input-row {
   display: grid;
-  grid-template-columns: 4.5rem 1fr;
-  gap: 0.5rem;
+  grid-template-columns: max-content 1fr;
+  gap: var(--prompt-gap);
   align-items: start;
 }
 .prompt {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.8rem;
   color: var(--prompt);
-  padding-top: 0.85rem;
-  text-align: right;
+  padding: 0.85rem 0 0 var(--prompt-pad-left);
+  min-width: var(--prompt-col);
+  text-align: left;
+  white-space: nowrap;
   user-select: none;
 }
 .prompt.in { color: #303f9f; }
 .prompt.out { color: #a05a2c; }
+.prompt.in,
+.prompt.out { text-align: right; }
 .prompt.err { color: var(--err-fg); }
 pre.source {
   margin: 0;
-  padding: 0.85rem 1rem;
+  padding: 0.85rem var(--source-pad-x);
   background: var(--code-bg);
   color: var(--code-fg);
   border: 1px solid var(--code-border);
@@ -368,8 +493,8 @@ mark.note-hl {
 .outputs { margin-top: 0.45rem; }
 .output-row {
   display: grid;
-  grid-template-columns: 4.5rem 1fr;
-  gap: 0.5rem;
+  grid-template-columns: max-content 1fr;
+  gap: var(--prompt-gap);
   align-items: start;
   margin-top: 0.35rem;
 }
@@ -385,25 +510,123 @@ mark.note-hl {
   word-break: break-word;
 }
 .output-body.html-out {
-  font-family: inherit; white-space: normal; background: var(--surface);
+  /* JupyterLab .jp-RenderedHTMLCommon: proportional text, not the stream font. */
+  font-family: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: rgba(0, 0, 0, 0.87);
+  white-space: normal;
+  word-break: normal;
+  background: var(--surface);
 }
+/* Same table rules as JupyterLab rendermime. Non-markdown HTML is right-aligned.
+   Pandas ships the index rules in a <style> block; the sanitizer drops it. */
+.output-body.html-out table {
+  border-collapse: collapse;
+  border-spacing: 0;
+  border: none;
+  color: rgba(0, 0, 0, 0.87);
+  font-size: 13px;
+  table-layout: fixed;
+  margin: 0 auto 1em;
+}
+.output-body.html-out thead {
+  border-bottom: 1px solid #bdbdbd;
+  vertical-align: bottom;
+}
+.output-body.html-out td,
+.output-body.html-out th,
+.output-body.html-out tr {
+  vertical-align: middle;
+  padding: 0.5em;
+  line-height: normal;
+  white-space: normal;
+  word-break: normal;
+  max-width: none;
+  border: none;
+  text-align: right;
+}
+.output-body.html-out th { font-weight: bold; }
+.output-body.html-out tbody tr:nth-child(odd) { background: #fff; }
+.output-body.html-out tbody tr:nth-child(even) { background: #f5f5f5; }
+.output-body.html-out tbody tr:hover { background: #e1f5fe; }
+.output-body.html-out .dataframe tbody tr th { vertical-align: top; }
+.output-body.html-out .dataframe tbody tr th:only-of-type { vertical-align: middle; }
+.output-body.html-out .dataframe thead th { text-align: right; }
+.output-body.html-out p { text-align: left; margin: 0 0 1em; }
+.output-body.html-out > *:last-child { margin-bottom: 0.5em; }
 .output-body.stderr, .output-body.error {
   background: var(--err-bg); color: var(--err-fg); border-color: #f0c2bc;
 }
 .output-body img { max-width: 100%; height: auto; display: block; }
-details.long-output {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  padding: 0.35rem 0.6rem 0.6rem;
+.output-collapse { position: relative; }
+.output-collapse-body { display: flow-root; }
+/* Clip the hidden text inside the body so the rounded button can sit on the
+   cell border without being cut off. scrollHeight still reports the full height. */
+.output-collapse.is-long:not(.is-open) { overflow: visible; }
+/* Same prompt column and font as the code row, so 1ch matches and both
+   the show and hide buttons line up with the code block. */
+.cell-code .output-collapse.is-long,
+.cell-synthetic-output .output-collapse.is-long {
+  display: grid;
+  grid-template-columns: var(--prompt-col) minmax(0, 1fr);
+  column-gap: var(--prompt-gap);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8rem;
 }
-details.long-output > summary {
+.output-collapse.is-long.is-open > .output-collapse-body {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+.output-collapse.is-long:not(.is-open) > .output-collapse-body {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+.output-collapse-toggle {
+  display: none;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
   cursor: pointer;
   font-family: ui-sans-serif, system-ui, sans-serif;
   font-size: 0.85rem;
   color: var(--muted);
-  padding: 0.35rem 0.25rem;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.35rem 0.6rem;
 }
+.output-collapse.is-long > .output-collapse-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  grid-column: 2;
+  grid-row: 1;
+  width: 100%;
+}
+.output-collapse-toggle::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 0;
+  height: 0;
+  border-left: 0.34em solid transparent;
+  border-right: 0.34em solid transparent;
+}
+/* Down while the output is hidden (show it); up while it is open (hide it). */
+.output-collapse.is-long:not(.is-open) > .output-collapse-toggle::before {
+  border-top: 0.42em solid currentColor;
+}
+.output-collapse.is-long.is-open > .output-collapse-toggle::before {
+  border-bottom: 0.42em solid currentColor;
+}
+.output-collapse.is-long.is-open > .output-collapse-toggle { margin-bottom: 0.35rem; }
+.output-collapse-toggle:hover { background: #f3f3f3; }
 .note-card {
   background: #fff;
   border: 1px solid var(--border);
@@ -679,8 +902,6 @@ footer.doc-footer {
   .note-card { position: relative; margin-bottom: 0.5rem; top: auto !important; }
   svg.cell-connectors { display: none; }
   body { padding: 1rem 0.75rem 4rem; }
-  .cell-code .input-row, .output-row { grid-template-columns: 1fr; }
-  .prompt { text-align: left; padding-top: 0; }
 }
 
 
@@ -881,8 +1102,8 @@ pre.source.diff-lined code {
 .cell-synthetic-output .output-row,
 .cell-synthetic-output .input-row {
   display: grid;
-  grid-template-columns: 4.5rem 1fr;
-  gap: 0.5rem;
+  grid-template-columns: max-content 1fr;
+  gap: var(--prompt-gap);
   align-items: start;
 }
 /* Diff nav sits above notes nav */

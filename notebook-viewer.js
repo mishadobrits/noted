@@ -360,12 +360,6 @@ async function makeHtmlSelfContained(html) {
     return "";
   }
 
-  function safeMarkdownUrl(url, kind) {
-    if (typeof HtmlSanitize !== "undefined" && HtmlSanitize && typeof HtmlSanitize.safeUrl === "function")
-      return HtmlSanitize.safeUrl(url, kind);
-    return "";
-  }
-
   function noteOpacity(n) {
     const v = (n && n.opacity != null) ? Number(n.opacity)
       : ((n && n.alpha != null) ? Number(n.alpha) : 1);
@@ -535,6 +529,12 @@ async function makeHtmlSelfContained(html) {
     return String(s).replace(/<[^>]+>/g, "");
   }
 
+  function htmlVisibleText(html) {
+    if (typeof HtmlSanitize !== "undefined" && HtmlSanitize && typeof HtmlSanitize.visibleHtmlText === "function")
+      return HtmlSanitize.visibleHtmlText(html);
+    return stripHtmlTags(html);
+  }
+
   function outputText(cellId, outputIndex) {
     const idx = cellIndexById(cellId);
     if (idx < 0) return "";
@@ -550,7 +550,7 @@ async function makeHtmlSelfContained(html) {
     }
     if (otype === "execute_result" || otype === "display_data") {
       const data = output.data || {};
-      if (data["text/html"] != null) return stripHtmlTags(joinText(data["text/html"]));
+      if (data["text/html"] != null) return htmlVisibleText(joinText(data["text/html"]));
       if (data["text/plain"] != null) return joinText(data["text/plain"]);
       return "";
     }
@@ -1223,21 +1223,32 @@ async function makeHtmlSelfContained(html) {
   }
 
   function typesetMath() {
-    if (typeof renderMathInElement !== "function") return;
-    const opts = {
-      delimiters: [
-        { left: "$$", right: "$$", display: true },
-        { left: "$", right: "$", display: false },
-        { left: "\\[", right: "\\]", display: true },
-        { left: "\\(", right: "\\)", display: false }
-      ],
-      throwOnError: false,
-      ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code"],
-      // Keep .tex-math wrappers so data-tex survives for selection mapping
-      preProcess: null
-    };
-    document.querySelectorAll(".md-rendered, .note-card-body").forEach(function (el) {
-      try { renderMathInElement(el, opts); } catch (e) {}
+    if (typeof katex === "undefined" || !katex || typeof katex.render !== "function") return;
+    document.querySelectorAll(".md-rendered .tex-math, .note-card-body .tex-math").forEach(function (el) {
+      if (el.querySelector(".katex")) return;
+      const raw = el.getAttribute("data-tex") || "";
+      if (!raw) return;
+      let tex = raw;
+      let display = false;
+      if (raw.slice(0, 2) === "$$" && raw.slice(-2) === "$$" && raw.length >= 4) {
+        tex = raw.slice(2, -2);
+        display = true;
+      } else if (raw.slice(0, 3) === "\\\\[" && raw.slice(-3) === "\\\\]") {
+        tex = raw.slice(3, -3);
+        display = true;
+      } else if (raw.slice(0, 3) === "\\\\(" && raw.slice(-3) === "\\\\)") {
+        tex = raw.slice(3, -3);
+      } else if (raw.slice(0, 2) === "\\[" && raw.slice(-2) === "\\]") {
+        tex = raw.slice(2, -2);
+        display = true;
+      } else if (raw.slice(0, 2) === "\\(" && raw.slice(-2) === "\\)") {
+        tex = raw.slice(2, -2);
+      } else if (raw.charAt(0) === "$" && raw.charAt(raw.length - 1) === "$" && raw.length >= 3) {
+        tex = raw.slice(1, -1);
+      } else if (raw.slice(0, 6) === "\\begin") {
+        display = true;
+      }
+      try { katex.render(tex, el, { throwOnError: false, displayMode: display }); } catch (e) {}
     });
   }
 
@@ -1251,8 +1262,8 @@ async function makeHtmlSelfContained(html) {
     });
   }
 
-  // Note-comment markdown — same basics as notebook cells (math, code, bold/italic, links, headings, lists).
-  // Prefer shared converter when the viewer loaded IpynbToHtml; otherwise use the local path.
+  // Notebook cells and note comments. JupyterLab parses GFM with marked, then sanitizes.
+  // Prefer the shared converter when this page loaded IpynbToHtml; generated pages use marked directly.
   function commentMarkdownToHtml(src) {
     if (window.IpynbToHtml && typeof window.IpynbToHtml.markdownToHtml === "function") {
       return window.IpynbToHtml.markdownToHtml(String(src || ""));
@@ -1260,343 +1271,23 @@ async function makeHtmlSelfContained(html) {
     return localCommentMarkdownToHtml(String(src || ""));
   }
 
-  function applyEmphasisMarkers(text) {
-    function findCloser(s, from, marker, len) {
-      var i = from;
-      while (i < s.length) {
-        if (s.charAt(i) === "\n") return -1;
-        if (s.charAt(i) === marker) {
-          var run = 1;
-          while (i + run < s.length && s.charAt(i + run) === marker) run += 1;
-          if (run >= len) return i;
-          i += run;
-          continue;
-        }
-        i += 1;
-      }
-      return -1;
-    }
-    function parse(s) {
-      var out = "";
-      var i = 0;
-      while (i < s.length) {
-        var ch = s.charAt(i);
-        if (ch !== "*" && ch !== "_") {
-          out += ch;
-          i += 1;
-          continue;
-        }
-        var marker = ch;
-        var run = 1;
-        while (i + run < s.length && s.charAt(i + run) === marker) run += 1;
-        var matched = false;
-        var maxLen = run > 3 ? 3 : run;
-        for (var len = maxLen; len >= 1; len -= 1) {
-          var close = findCloser(s, i + len, marker, len);
-          if (close < 0) continue;
-          var interior = s.slice(i + len, close);
-          if (!interior.length || !interior.trim().length) continue;
-          var inner = parse(interior);
-          if (len === 3) out += "<strong><em>" + inner + "</em></strong>";
-          else if (len === 2) out += "<strong>" + inner + "</strong>";
-          else out += "<em>" + inner + "</em>";
-          i = close + len;
-          matched = true;
-          break;
-        }
-        if (!matched) {
-          out += marker;
-          i += 1;
-        }
-      }
-      return out;
-    }
-    return parse(String(text));
-  }
-
-  function applyItalicMarkers(text) {
-    return applyEmphasisMarkers(text);
-  }
-
   function localCommentMarkdownToHtml(src) {
-    const MATH_RE = /(\$\$[\s\S]+?\$\$)|(\$[^\$\n]+?\$)|(\\\[[\s\S]+?\\\])|(\\\([\s\S]+?\\\))/g;
-    const maths = [];
-    src = String(src).replace(MATH_RE, function (m) {
-      maths.push(m);
-      return "@@MATH" + (maths.length - 1) + "@@";
-    });
-    function restoreMath(html) {
-      let out = html;
-      for (let i = 0; i < maths.length; i++) {
-        const raw = maths[i];
-        out = out.split("@@MATH" + i + "@@").join(
-          '<span class="tex-math" data-tex="' + escapeHtml(raw) + '">' + escapeHtml(raw) + "</span>"
-        );
-      }
-      return out;
+    const api = globalThis.JupyterRemoveMath;
+    const extracted = api && typeof api.removeMath === "function"
+      ? api.removeMath(String(src || ""))
+      : { text: String(src || ""), math: [] };
+    const text = extracted.text;
+    const maths = extracted.math;
+    let html = "";
+    if (typeof marked !== "undefined" && marked && typeof marked.parse === "function") {
+      const parsed = marked.parse(text, { async: false, gfm: true, breaks: false });
+      if (parsed && typeof parsed.then === "function") throw new Error("marked.parse returned a promise");
+      html = sanitizeNotebookHtml(parsed);
+    } else {
+      html = "<p>" + escapeHtml(text) + "</p>";
     }
-    function inlineMd(text) {
-      const parts = [];
-      let i = 0;
-      while (i < text.length) {
-        if (text[i] === "`") {
-          const j = text.indexOf("`", i + 1);
-          if (j !== -1) {
-            parts.push("<code>" + escapeHtml(text.slice(i + 1, j)) + "</code>");
-            i = j + 1;
-            continue;
-          }
-        }
-        const nextBt = text.indexOf("`", i);
-        const chunk = nextBt === -1 ? text.slice(i) : text.slice(i, nextBt);
-        let val = chunk;
-        val = val.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_m, alt, href) {
-          const url = safeMarkdownUrl(href, "image");
-          if (!url) return escapeHtml(alt);
-          return '<img alt="' + escapeHtml(alt) + '" src="' + escapeHtml(url) + '">';
-        });
-        val = val.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_m, label, href) {
-          const url = safeMarkdownUrl(href, "link");
-          if (!url) return escapeHtml(label);
-          return '<a href="' + escapeHtml(url) + '">' + escapeHtml(label) + "</a>";
-        });
-        const pieces = val.split(/(<\/?(?:a|img|code)\b[^>]*>)/);
-        const rebuilt = [];
-        for (let pi = 0; pi < pieces.length; pi++) {
-          const p = pieces[pi];
-          if (p.charAt(0) === "<") rebuilt.push(p);
-          else {
-            const p2 = applyEmphasisMarkers(p);
-            const sub = p2.split(/(<\/?(?:strong|em)>)/);
-            for (let si = 0; si < sub.length; si++) {
-              const part = sub[si];
-              if (
-                part === "<em>" || part === "</em>" ||
-                part === "<strong>" || part === "</strong>"
-              ) rebuilt.push(part);
-              else rebuilt.push(escapeHtml(part));
-            }
-          }
-        }
-        parts.push(rebuilt.join(""));
-        if (nextBt === -1) break;
-        i = nextBt;
-      }
-      return parts.join("");
-    }
-    const lines = src.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-    const htmlParts = [];
-    let i = 0;
-    let para = [];
-    const FENCE_RE = /^```([\w-]*)\s*$/;
-    const HEADING_RE = /^(#{1,6})\s+(.*)$/;
-    const HR_RE = /^(-{3,}|\*{3,}|_{3,})\s*$/;
-    function lineHasHardBreak(line) { return / {2,}$/.test(line); }
-    function renderInlines(parts) {
-      const rendered = [];
-      for (let k = 0; k < parts.length; k++) {
-        const text = String(parts[k].text || "").replace(/^[ \t]+|[ \t]+$/g, "");
-        if (!text) continue;
-        rendered.push({ html: inlineMd(text), hard: !!parts[k].hard });
-      }
-      const bits = [];
-      for (let r = 0; r < rendered.length; r++) {
-        if (r > 0) bits.push(rendered[r - 1].hard ? "<br>" : " ");
-        bits.push(rendered[r].html);
-      }
-      return bits.join("");
-    }
-    function flushPara() {
-      if (!para.length) return;
-      const html = renderInlines(para);
-      if (html) htmlParts.push("<p>" + html + "</p>");
-      para = [];
-    }
-    function leadingWs(line) {
-      let n = 0;
-      while (n < line.length && (line.charAt(n) === " " || line.charAt(n) === "\t")) n++;
-      return n;
-    }
-    function parseMarker(line) {
-      const m = /^(\s*)([-*+]|\d+\.)[ \t]+(.*)$/.exec(line);
-      if (!m) return null;
-      const indent = m[1].length;
-      const bullet = m[2];
-      const type = /^\d+\.$/.test(bullet) ? "ol" : "ul";
-      const after = indent + bullet.length;
-      let sep = 0;
-      while (after + sep < line.length && (line.charAt(after + sep) === " " || line.charAt(after + sep) === "\t")) sep++;
-      return {
-        indent: indent,
-        type: type,
-        bullet: bullet,
-        number: type === "ol" ? parseInt(bullet, 10) : null,
-        content: line.slice(after + sep).replace(/[ \t]+$/g, ""),
-        contentCol: after + sep,
-        hard: lineHasHardBreak(line),
-      };
-    }
-    function isSibling(marker, list) {
-      if (!marker || marker.type !== list.type) return false;
-      if (list.type === "ul" && marker.bullet !== list.bullet) return false;
-      if (marker.indent < list.indent || marker.indent > list.indent + 3) return false;
-      if (list.items.length && marker.indent >= list.items[list.items.length - 1].contentCol) return false;
-      return true;
-    }
-    function isTopInterrupt(line) {
-      return FENCE_RE.test(line) || HEADING_RE.test(line) || HR_RE.test(line);
-    }
-    function stripIndent(line, col) {
-      let at = 0, n = 0;
-      while (at < line.length && n < col && (line.charAt(at) === " " || line.charAt(at) === "\t")) { at++; n++; }
-      return line.slice(at).replace(/[ \t]+$/g, "");
-    }
-    function nextNonBlank(from) {
-      let k = from;
-      while (k < lines.length && !String(lines[k] || "").trim()) k++;
-      return k;
-    }
-    function lineBelongsToItem(line, item, afterBlank) {
-      if (!line || !String(line).trim()) return false;
-      const indent = leadingWs(line);
-      const marker = parseMarker(line);
-      if (marker && marker.indent >= item.contentCol) return true;
-      if (indent >= item.contentCol && !isTopInterrupt(line)) return true;
-      if (isTopInterrupt(line)) return false;
-      if (marker && marker.indent < item.contentCol) return false;
-      if (afterBlank) return false;
-      return true;
-    }
-    function renderList(list) {
-      let open = "<" + list.type + ">";
-      if (list.type === "ol" && list.start !== 1) open = '<ol start="' + list.start + '">';
-      const parts = [open];
-      for (let n = 0; n < list.items.length; n++)
-        parts.push("<li>" + renderItem(list.items[n], list.loose) + "</li>");
-      parts.push("</" + list.type + ">");
-      return parts.join("\n");
-    }
-    function renderItem(item, loose) {
-      const parts = [];
-      for (let b = 0; b < item.blocks.length; b++) {
-        const block = item.blocks[b];
-        if (block.type === "list") { parts.push(renderList(block.list)); continue; }
-        const inner = renderInlines(block.lines);
-        if (!inner) continue;
-        parts.push(loose ? "<p>" + inner + "</p>" : inner);
-      }
-      return parts.join("\n");
-    }
-    function parseList(startIndex) {
-      const first = parseMarker(lines[startIndex]);
-      const list = {
-        type: first.type, bullet: first.bullet, indent: first.indent,
-        start: first.number || 1, items: [], loose: false,
-      };
-      let idx = startIndex;
-      while (idx < lines.length) {
-        if (!String(lines[idx] || "").trim()) {
-          const k = nextNonBlank(idx);
-          const ahead = k < lines.length ? parseMarker(lines[k]) : null;
-          if (!isSibling(ahead, list)) break;
-          list.loose = true;
-          idx = k;
-          continue;
-        }
-        const marker = parseMarker(lines[idx]);
-        if (!isSibling(marker, list)) break;
-        const item = { contentCol: marker.contentCol, blocks: [] };
-        let pLines = [];
-        if (marker.content) pLines.push({ text: marker.content, hard: marker.hard });
-        idx++;
-        let pendingBlank = false;
-        while (idx < lines.length) {
-          const line = lines[idx];
-          if (!String(line || "").trim()) {
-            const k2 = nextNonBlank(idx);
-            if (k2 >= lines.length || !lineBelongsToItem(lines[k2], item, true)) break;
-            pendingBlank = true;
-            idx = k2;
-            continue;
-          }
-          if (!lineBelongsToItem(line, item, pendingBlank)) break;
-          const nested = parseMarker(line);
-          if (nested && nested.indent >= item.contentCol) {
-            if (pLines.length) item.blocks.push({ type: "p", lines: pLines });
-            pLines = [];
-            if (pendingBlank) list.loose = true;
-            const sub = parseList(idx);
-            if (sub.list.items.length) item.blocks.push({ type: "list", list: sub.list });
-            if (sub.next <= idx) break;
-            idx = sub.next;
-            pendingBlank = false;
-            continue;
-          }
-          const text = leadingWs(line) >= item.contentCol
-            ? stripIndent(line, item.contentCol)
-            : String(line).replace(/^[ \t]+|[ \t]+$/g, "");
-          if (pendingBlank && pLines.length) {
-            item.blocks.push({ type: "p", lines: pLines });
-            pLines = [];
-            list.loose = true;
-          }
-          pendingBlank = false;
-          if (text) pLines.push({ text: text, hard: lineHasHardBreak(line) });
-          idx++;
-        }
-        if (pLines.length) item.blocks.push({ type: "p", lines: pLines });
-        list.items.push(item);
-      }
-      return { list: list, next: idx };
-    }
-    while (i < lines.length) {
-      const line = lines[i];
-      const fence = FENCE_RE.exec(line);
-      if (fence) {
-        flushPara();
-        i += 1;
-        const codeLines = [];
-        while (i < lines.length && !FENCE_RE.test(lines[i])) {
-          codeLines.push(lines[i]);
-          i += 1;
-        }
-        if (i < lines.length) i += 1;
-        const cls = fence[1] ? ' class="language-' + escapeHtml(fence[1]) + '"' : "";
-        htmlParts.push("<pre><code" + cls + ">" + escapeHtml(codeLines.join("\n")) + "</code></pre>");
-        continue;
-      }
-      if (!line.trim()) { flushPara(); i += 1; continue; }
-      const hm = HEADING_RE.exec(line);
-      if (hm) {
-        flushPara();
-        htmlParts.push("<h" + hm[1].length + ">" + inlineMd(hm[2].trim()) + "</h" + hm[1].length + ">");
-        i += 1;
-        continue;
-      }
-      if (HR_RE.test(line)) {
-        flushPara();
-        htmlParts.push("<hr>");
-        i += 1;
-        continue;
-      }
-      const marker = parseMarker(line);
-      if (marker) {
-        flushPara();
-        const parsed = parseList(i);
-        if (!parsed.list.items.length || parsed.next <= i) {
-          para.push({ text: line.trim(), hard: lineHasHardBreak(line) });
-          i += 1;
-          continue;
-        }
-        htmlParts.push(renderList(parsed.list));
-        i = parsed.next;
-        continue;
-      }
-      para.push({ text: line.trim(), hard: lineHasHardBreak(line) });
-      i += 1;
-    }
-    flushPara();
-    return restoreMath(htmlParts.join("\n") || "<p></p>");
+    if (api && typeof api.restoreMathSpans === "function") return api.restoreMathSpans(html, maths, escapeHtml);
+    return html;
   }
 
   function cardHtml(n, bodyInner, depth) {
@@ -1871,6 +1562,109 @@ async function makeHtmlSelfContained(html) {
     return a.top + band / 2 - originTop;
   }
 
+  function textAnchorMarks(anchor) {
+    const noteId = anchor.getAttribute("data-note");
+    const anchorIndex = anchor.getAttribute("data-anchor") || "0";
+    let marks = [];
+    if (noteId != null) {
+      marks = Array.prototype.slice.call(
+        document.querySelectorAll(
+          'mark.note-hl[data-note="' + noteId + '"][data-anchor="' + anchorIndex + '"]'
+        )
+      ).filter(function (mark) {
+        return !(mark.classList && (
+          mark.classList.contains("between-lines-mark") ||
+          mark.classList.contains("between-cells-mark")
+        ));
+      });
+    }
+    if (!marks.length) marks = [anchor];
+    return marks;
+  }
+
+  function selectionLineBoxes(anchor) {
+    const rects = [];
+    textAnchorMarks(anchor).forEach(function (mark) {
+      const list = mark.getClientRects();
+      for (let i = 0; i < list.length; i++) {
+        const r = list[i];
+        if (r.width < 0.5 && r.height < 0.5) continue;
+        rects.push(r);
+      }
+    });
+    if (!rects.length) rects.push(anchor.getBoundingClientRect());
+    const lines = [];
+    rects.forEach(function (r) {
+      let line = null;
+      for (let i = 0; i < lines.length; i++) {
+        const overlap = Math.min(lines[i].bottom, r.bottom) - Math.max(lines[i].top, r.top);
+        if (overlap > Math.min(lines[i].bottom - lines[i].top, r.height) * 0.5) {
+          line = lines[i];
+          break;
+        }
+      }
+      if (!line) {
+        lines.push({ top: r.top, bottom: r.bottom, right: r.right });
+      } else {
+        line.top = Math.min(line.top, r.top);
+        line.bottom = Math.max(line.bottom, r.bottom);
+        line.right = Math.max(line.right, r.right);
+      }
+    });
+    return lines;
+  }
+
+  // Right edge of the text line that contains lineBox, inside the anchor's block.
+  function textLineEndX(anchor, lineBox) {
+    const root = anchor.closest(
+      "[data-role='cell-source'], .md-rendered, .output-body, .annotatable-output, pre.source"
+    ) || anchor.parentElement;
+    let maxRight = lineBox.right;
+    if (!root) return maxRight;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    let node = walker.nextNode();
+    while (node) {
+      if (node.nodeValue && node.nodeValue.trim()) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const list = range.getClientRects();
+        for (let i = 0; i < list.length; i++) {
+          const r = list[i];
+          if (r.width < 0.5) continue;
+          const overlap = Math.min(r.bottom, lineBox.bottom) - Math.max(r.top, lineBox.top);
+          const band = Math.min(lineBox.bottom - lineBox.top, r.height);
+          if (band > 0 && overlap > band * 0.5 && r.right > maxRight) maxRight = r.right;
+        }
+      }
+      node = walker.nextNode();
+    }
+    return maxRight;
+  }
+
+  // When the note sits on the selection's line, leave from that line's upper-right
+  // corner and run horizontally to the end of the text line. Otherwise return
+  // null and the connector keeps the midpoint curve.
+  function sameHeightConnectorRun(anchor, noteViewportY) {
+    const lines = selectionLineBoxes(anchor);
+    let line = null;
+    const slack = 2;
+    for (let i = 0; i < lines.length; i++) {
+      const box = lines[i];
+      if (noteViewportY >= box.top - slack && noteViewportY <= box.bottom + slack) {
+        if (!line || Math.abs((box.top + box.bottom) / 2 - noteViewportY) <
+            Math.abs((line.top + line.bottom) / 2 - noteViewportY)) {
+          line = box;
+        }
+      }
+    }
+    if (!line) return null;
+    return {
+      x: line.right,
+      y: line.top,
+      xRun: textLineEndX(anchor, line)
+    };
+  }
+
   function collectAllAnchorMarks(noteId) {
     // Document-wide: anchors in other cells contribute to the mass center.
     let marks = Array.prototype.slice.call(
@@ -1997,15 +1791,25 @@ async function makeHtmlSelfContained(html) {
           const c = card.getBoundingClientRect();
           const isBetween = anchor.classList && anchor.classList.contains("between-lines-mark");
           const band = (a.height >= 1) ? a.height : (isBetween ? 3 : Math.max(a.height, 1));
-          const x1 = a.right - rowRect.left;
-          const y1 = a.top + Math.max(band, 1) / 2 - rowRect.top;
           const x2 = c.left - rowRect.left;
           const y2 = c.top + Math.min(c.height / 2, 14) - rowRect.top;
+          let x1 = a.right - rowRect.left;
+          let y1 = a.top + Math.max(band, 1) / 2 - rowRect.top;
+          let xRun = null;
+          if (!isBetween) {
+            const run = sameHeightConnectorRun(anchor, y2 + rowRect.top);
+            if (run) {
+              x1 = run.x - rowRect.left;
+              y1 = run.y - rowRect.top;
+              xRun = run.xRun - rowRect.left;
+            }
+          }
           minY = Math.min(minY, y1, y2);
           maxY = Math.max(maxY, y1, y2);
           maxX = Math.max(maxX, x1, x2);
+          if (xRun != null) maxX = Math.max(maxX, xRun);
           segments.push({
-            x1: x1, y1: y1, x2: x2, y2: y2, isBetween: isBetween, band: band,
+            x1: x1, y1: y1, x2: x2, y2: y2, xRun: xRun, isBetween: isBetween, band: band,
             color: getComputedStyle(card).getPropertyValue("--note-color").trim() || "#888"
           });
         });
@@ -2024,9 +1828,17 @@ async function makeHtmlSelfContained(html) {
       segments.forEach(function (seg) {
         const y1 = seg.y1 - top;
         const y2 = seg.y2 - top;
-        const mid = (seg.x1 + seg.x2) / 2;
         const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        path.setAttribute("d", "M " + seg.x1 + " " + y1 + " C " + mid + " " + y1 + ", " + mid + " " + y2 + ", " + seg.x2 + " " + y2);
+        let d;
+        if (seg.xRun != null && seg.xRun > seg.x1 + 1) {
+          const mid = (seg.xRun + seg.x2) / 2;
+          d = "M " + seg.x1 + " " + y1 + " L " + seg.xRun + " " + y1 +
+            " C " + mid + " " + y1 + ", " + mid + " " + y2 + ", " + seg.x2 + " " + y2;
+        } else {
+          const mid = (seg.x1 + seg.x2) / 2;
+          d = "M " + seg.x1 + " " + y1 + " C " + mid + " " + y1 + ", " + mid + " " + y2 + ", " + seg.x2 + " " + y2;
+        }
+        path.setAttribute("d", d);
         path.setAttribute("fill", "none");
         path.setAttribute("stroke", seg.color);
         path.setAttribute("stroke-width", seg.isBetween ? String(Math.max(seg.band, 1)) : "1.5");
@@ -2261,67 +2073,6 @@ async function makeHtmlSelfContained(html) {
           owner.appendChild(el);
         });
       });
-    });
-  }
-
-  // Safety net: convert leftover _…_ / *…* in text nodes (outside code/tex) to <em>.
-  function fixLiteralEmphasisIn(root) {
-    if (!root) return;
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode: function (n) {
-        let p = n.parentElement;
-        while (p && p !== root) {
-          const tag = (p.tagName || "").toLowerCase();
-          if (tag === "code" || tag === "pre" || tag === "script" || tag === "style") {
-            return NodeFilter.FILTER_REJECT;
-          }
-          if (p.classList && (p.classList.contains("tex-math") || p.classList.contains("katex") ||
-              p.classList.contains("katex-html") || p.classList.contains("katex-mathml"))) {
-            return NodeFilter.FILTER_REJECT;
-          }
-          if (tag === "em" || tag === "i") return NodeFilter.FILTER_REJECT;
-          p = p.parentElement;
-        }
-        return NodeFilter.FILTER_ACCEPT;
-      }
-    });
-    const nodes = [];
-    let node;
-    while ((node = walker.nextNode())) {
-      if (node.nodeValue && /[*_]/.test(node.nodeValue)) nodes.push(node);
-    }
-    nodes.forEach(function (tn) {
-      const raw = tn.nodeValue;
-      const marked = applyEmphasisMarkers(raw);
-      if (marked === raw) return;
-      if (marked.indexOf("<em>") < 0 && marked.indexOf("<strong>") < 0) return;
-      const frag = document.createDocumentFragment();
-      const parts = marked.split(/(<\/?(?:strong|em)>)/);
-      const stack = [];
-      parts.forEach(function (part) {
-        if (part === "<em>" || part === "<strong>") {
-          const el = document.createElement(part === "<em>" ? "em" : "strong");
-          stack.push(el);
-          return;
-        }
-        if (part === "</em>" || part === "</strong>") {
-          const el = stack.pop();
-          if (!el) return;
-          if (stack.length) stack[stack.length - 1].appendChild(el);
-          else frag.appendChild(el);
-          return;
-        }
-        if (!part) return;
-        const text = document.createTextNode(part);
-        if (stack.length) stack[stack.length - 1].appendChild(text);
-        else frag.appendChild(text);
-      });
-      while (stack.length) {
-        const el = stack.pop();
-        if (stack.length) stack[stack.length - 1].appendChild(el);
-        else frag.appendChild(el);
-      }
-      tn.parentNode.replaceChild(frag, tn);
     });
   }
 
@@ -2593,7 +2344,7 @@ async function makeHtmlSelfContained(html) {
     if (output.output_type === 'stream') return joinText(output.text);
     if (output.output_type === 'error') return (output.traceback || []).map(stripAnsi).join('\n') || ((output.ename || 'Error') + ': ' + (output.evalue || ''));
     const data = output.data || {};
-    if (data['text/html'] != null) return stripHtmlTags(joinText(data['text/html']));
+    if (data['text/html'] != null) return htmlVisibleText(joinText(data['text/html']));
     if (data['text/plain'] != null) return joinText(data['text/plain']);
     return '';
   }
@@ -2630,7 +2381,7 @@ async function makeHtmlSelfContained(html) {
       if (output) {
         if (output.output_type === "stream") outputSource = joinText(output.text);
         else if (output.output_type === "error") outputSource = (output.traceback || []).map(stripAnsi).join("\n") || ((output.ename || "Error") + ": " + (output.evalue || ""));
-        else if (output.data && output.data["text/html"] != null) outputSource = stripHtmlTags(joinText(output.data["text/html"]));
+        else if (output.data && output.data["text/html"] != null) outputSource = htmlVisibleText(joinText(output.data["text/html"]));
         else if (output.data && output.data["text/plain"] != null) outputSource = joinText(output.data["text/plain"]);
       }
       if (output && (!substring || findNth(outputSource, substring, occurrence) >= 0)) {
@@ -2712,6 +2463,120 @@ async function makeHtmlSelfContained(html) {
     return anchor;
   }
 
+  // A cell's outputs are long when their combined height exceeds 80% of the
+  // viewport. Line and character counts are not used; the page measures layout.
+  function outputsAreLong(totalHeight, availableScreenHeight) {
+    if (!(availableScreenHeight > 0) || !(totalHeight > 0)) return false;
+    return totalHeight > availableScreenHeight * 0.8;
+  }
+
+  function availableScreenHeight() {
+    return window.innerHeight || document.documentElement.clientHeight || 0;
+  }
+
+  function directChildWithClass(parent, className) {
+    for (var i = 0; i < parent.children.length; i++) {
+      if (parent.children[i].classList.contains(className)) return parent.children[i];
+    }
+    return null;
+  }
+
+  function outputCollapseGroups() {
+    var groups = [];
+    document.querySelectorAll("section.cell > .cell-body > .outputs").forEach(function (el) {
+      groups.push(el);
+    });
+    document.querySelectorAll("section.cell-synthetic-output > .cell-body").forEach(function (el) {
+      if (directChildWithClass(el, "output-row") || directChildWithClass(el, "output-collapse")) {
+        groups.push(el);
+      }
+    });
+    return groups;
+  }
+
+  function bindOutputCollapseToggle(collapse) {
+    var toggle = directChildWithClass(collapse, "output-collapse-toggle");
+    if (!toggle || toggle._longOutputBound) return;
+    toggle._longOutputBound = true;
+    toggle.addEventListener("click", function () {
+      collapse.classList.toggle("is-open");
+      collapse.dataset.userToggled = "1";
+      updateOutputCollapseToggle(collapse);
+    });
+  }
+
+  function updateOutputCollapseToggle(collapse) {
+    var toggle = directChildWithClass(collapse, "output-collapse-toggle");
+    if (!toggle) return;
+    var open = collapse.classList.contains("is-open");
+    var long = collapse.classList.contains("is-long");
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    toggle.textContent = open && long ? "Hide long output" : "Show long output";
+  }
+
+  function ensureOutputCollapse(group) {
+    var collapse = directChildWithClass(group, "output-collapse");
+    if (!collapse) {
+      var rows = [];
+      for (var i = 0; i < group.children.length; i++) {
+        if (group.children[i].classList.contains("output-row")) rows.push(group.children[i]);
+      }
+      if (!rows.length) return null;
+      collapse = document.createElement("div");
+      collapse.className = "output-collapse is-long";
+      var toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "output-collapse-toggle";
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.textContent = "Show long output";
+      var body = document.createElement("div");
+      body.className = "output-collapse-body";
+      collapse.appendChild(toggle);
+      collapse.appendChild(body);
+      group.insertBefore(collapse, rows[0]);
+      rows.forEach(function (row) { body.appendChild(row); });
+    }
+    bindOutputCollapseToggle(collapse);
+    return collapse;
+  }
+
+  function totalOutputHeight(collapse) {
+    var body = directChildWithClass(collapse, "output-collapse-body");
+    if (!body) return 0;
+    return body.scrollHeight;
+  }
+
+  function syncOutputCollapse(collapse) {
+    var available = availableScreenHeight();
+    var total = totalOutputHeight(collapse);
+    var long = outputsAreLong(total, available);
+    var userChose = collapse.dataset.userToggled === "1";
+    // Stay collapsed until both the screen and the output have a real height.
+    if (!userChose && (!(available > 0) || !(total > 0))) long = true;
+    collapse.classList.toggle("is-long", long);
+    if (!userChose) {
+      if (long) collapse.classList.remove("is-open");
+      else collapse.classList.add("is-open");
+    }
+    updateOutputCollapseToggle(collapse);
+  }
+
+  function bindOutputImageLoads() {
+    document.querySelectorAll(".output-collapse-body img").forEach(function (img) {
+      if (img._longOutputLoad) return;
+      img._longOutputLoad = true;
+      if (!img.complete) img.addEventListener("load", syncLongOutputs);
+    });
+  }
+
+  function syncLongOutputs() {
+    outputCollapseGroups().forEach(function (group) {
+      var collapse = ensureOutputCollapse(group);
+      if (collapse) syncOutputCollapse(collapse);
+    });
+    bindOutputImageLoads();
+  }
+
   function applyClientHighlights() {
 
     document.querySelectorAll("section.cell").forEach(function (section) {
@@ -2733,7 +2598,6 @@ async function makeHtmlSelfContained(html) {
             if (live && live.trim()) clean = live;
           } catch (e) { /* keep clean */ }
           root.innerHTML = clean || root.innerHTML;
-          fixLiteralEmphasisIn(root);
           applyMarksToRenderedRoot(root, source, matched);
           placeBetweenMarkersAbsolute(root, source, cellId);
         }
@@ -2774,14 +2638,13 @@ async function makeHtmlSelfContained(html) {
       });
     });
     rebuildCellNotesRails();
-    document.querySelectorAll(".note-card-body.md-note").forEach(function (el) {
-      fixLiteralEmphasisIn(el);
-    });
     typesetMath();
     placeBetweenCellMarkers();
+    syncLongOutputs();
     requestAnimationFrame(function () {
       placeBetweenCellMarkers();
       layoutNoteCards();
+      syncLongOutputs();
       if (typeof updateNoteNav === "function") updateNoteNav();
     });
     const metaNotes = document.getElementById("meta-notes-count");
@@ -3023,8 +2886,23 @@ async function makeHtmlSelfContained(html) {
       if (srcEnd != null) regionFrom = Math.max(regionFrom, srcEnd);
 
       const region = source.slice(regionFrom, regionTo);
-      let atRel = region.indexOf(piece);
+      let atRel = -1;
       let matchedLen = piece.length;
+      // Repeated plain text (broken math that never became a tex atom) must bind
+      // the copy under the selection. indexOf would always take the first one.
+      // Only when the rendered text and the source contain the same copies, so
+      // markdown escapes have not inserted or dropped this string.
+      const pieceVisibleStart = r.start + localA;
+      if (proj.visible.slice(pieceVisibleStart, pieceVisibleStart + piece.length) === piece) {
+        const visCount = countNonOverlappingBefore(proj.visible, piece, proj.visible.length);
+        const srcCount = countNonOverlappingBefore(source, piece, source.length);
+        if (visCount > 0 && visCount === srcCount) {
+          const visibleOcc = countNonOverlappingBefore(proj.visible, piece, pieceVisibleStart);
+          const abs = findNth(source, piece, visibleOcc);
+          if (abs >= regionFrom && abs + piece.length <= regionTo) atRel = abs - regionFrom;
+        }
+      }
+      if (atRel < 0) atRel = region.indexOf(piece);
       if (atRel < 0) {
         const soft = softVisibleNeedle(piece) || piece.trim();
         if (soft) {
@@ -3349,15 +3227,15 @@ async function makeHtmlSelfContained(html) {
       count.textContent = !collecting ? "" : (pendingSelections.length === 1 ? "1 anchor kept" : pendingSelections.length + " anchors kept");
     }
     if (btnMake) {
-      btnMake.textContent = collecting ? "Finish note" : "Make a note";
+      btnMake.textContent = collecting ? "Create the note" : "Make a note";
       btnMake.title = collecting ? "Use the selected text as the last anchor and create the note" : "Create a note from the selected text";
     }
     if (btnSelectAnother) {
-      btnSelectAnother.textContent = collecting ? "Add another" : "Several anchors";
+      btnSelectAnother.textContent = collecting ? "Add another anchor" : "Select first anchor";
       btnSelectAnother.title = collecting ? "Keep the selected text as an anchor, then select another. This is not the last anchor." : "Keep the selected text as the first anchor, then select more";
     }
     if (btnAttachSel) {
-      btnAttachSel.textContent = collecting ? "Attach" : "Attach to existing note";
+      btnAttachSel.textContent = collecting ? "Attach to a note" : "Attach to existing note";
       btnAttachSel.title = collecting ? "Use the selected text as the last anchor and add them to an existing note" : "Add the selected text to an existing note";
     }
   }
@@ -4074,6 +3952,18 @@ async function makeHtmlSelfContained(html) {
     });
   }
 
+  function moveAnchorToOccurrence(anchor, occurrence) {
+    if (!anchor) return null;
+    const prev = Math.max(0, Number(anchor.occurrence) || 0);
+    anchor.occurrence = occurrence;
+    if (occurrence === prev) return null;
+    if (!anchor.substring || anchor.target === "between_lines" || anchor.target === "between_cells") return null;
+    const start = findNth(anchorTextForRange(anchor), anchor.substring, occurrence);
+    if (start < 0) return "That occurrence of this text was not found.";
+    anchor.range = [start, start + anchor.substring.length];
+    return null;
+  }
+
   function anchorsFromSelectionBatch(info, placement, occurrenceOverride) {
     const batch = info && Array.isArray(info.selection_batch) && info.selection_batch.length
       ? info.selection_batch
@@ -4081,7 +3971,10 @@ async function makeHtmlSelfContained(html) {
     const anchors = [];
     for (let i = 0; i < batch.length; i++) {
       const item = Object.assign({}, batch[i] || {});
-      if (i === 0 && occurrenceOverride != null) item.occurrence = Math.max(0, Number(occurrenceOverride) || 0);
+      if (i === 0 && occurrenceOverride != null) {
+        const moved = moveAnchorToOccurrence(item, Math.max(0, Number(occurrenceOverride) || 0));
+        if (moved) return { error: moved, anchors: [] };
+      }
       const anchor = buildAnchorFromPlacement(item, item.placement || placement || "selection");
       if (anchor && anchor.error) return { error: anchor.error, anchors: [] };
       anchors.push(normalizeAnchorToNewNotebook(anchor));
@@ -4413,10 +4306,18 @@ async function makeHtmlSelfContained(html) {
         norm.opacity = opacity;
         norm.header = header;
         norm.comment = comment;
-        // Update occurrence on the focused attached substring
+        // Occurrence is the match index of the substring. The highlight follows
+        // range when one is stored, so a new occurrence has to move that range.
         const ai = (focusAnchorIndex >= 0 && norm.anchors && focusAnchorIndex < norm.anchors.length)
           ? focusAnchorIndex : 0;
-        if (norm.anchors && norm.anchors[ai]) norm.anchors[ai].occurrence = occurrence;
+        if (norm.anchors && norm.anchors[ai]) {
+          const moved = moveAnchorToOccurrence(norm.anchors[ai], occurrence);
+          if (moved) {
+            alert(moved);
+            fieldOcc.focus();
+            return;
+          }
+        }
         replaceNoteInPlace(n, norm);
       }
     } else {
@@ -5016,7 +4917,9 @@ async function makeHtmlSelfContained(html) {
   }
 
   applyClientHighlights();
-  window.addEventListener("resize", function () { placeBetweenCellMarkers(); layoutNoteCards(); });
+  window.addEventListener("resize", function () { placeBetweenCellMarkers(); layoutNoteCards(); syncLongOutputs(); });
+  window.addEventListener("load", syncLongOutputs);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { syncLongOutputs(); });
   wireNoteNav();
 
   state.downloadNotesJson = downloadNotesJson;

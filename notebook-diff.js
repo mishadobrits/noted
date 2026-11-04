@@ -781,8 +781,16 @@
     }
     if (otype === "execute_result" || otype === "display_data") {
       var data = output.data || {};
-      if (data["text/html"] != null)
-        return String(joinText(data["text/html"])).replace(HTML_TAG, "");
+      if (data["text/html"] != null) {
+        var html = joinText(data["text/html"]);
+        var sanitize = root && root.HtmlSanitize;
+        if (!sanitize && typeof require === "function") {
+          try { sanitize = require("./html-sanitize.js"); } catch (e) { sanitize = null; }
+        }
+        if (sanitize && typeof sanitize.visibleHtmlText === "function")
+          return sanitize.visibleHtmlText(html);
+        return String(html).replace(HTML_TAG, "");
+      }
       if (data["text/plain"] != null) return joinText(data["text/plain"]);
       return "";
     }
