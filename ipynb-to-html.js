@@ -11,13 +11,18 @@
  *   node ipynb-to-html.js notebook.ipynb -o out.html
  *   node ipynb-to-html.js notebook.ipynb --notes notes.json
  *   node ipynb-to-html.js notebook.ipynb --readonly-notes
+ *   node ipynb-to-html.js notebook.ipynb --no-hide-tall-outputs
  *
  * Notes are not read from or written into the notebook. Pass --notes to
  * include a notes JSON file. --readonly-notes shows those notes but blocks
  * adding or editing them. The same lock is viewer.html?readonly-notes.
+ * Tall outputs start collapsed; --no-hide-tall-outputs leaves them expanded.
  *
  * Module API (CommonJS / browser global IpynbToHtml):
- *   convertNotebookToHtml(notebookObj, { title, sourceName, notes, allowNotes })
+ *   convertNotebookToHtml(notebookObj, {
+ *     title, sourceName, notes, allowNotes, hideTallOutputs,
+ *     exportNotebook, exportSourceName, noteStorageKey, diffInitialMode
+ *   })
  *   parseNotesList(data, label)
  *   notesFromNotebook(nb)
  *   loadNotebookJson(text) / validateNotebook(nb)
@@ -2179,6 +2184,7 @@
       diffHasFilteredVariant: hasFilteredDiffVariant,
       diffInitialMode:
         options.diffInitialMode || (hasFilteredDiffVariant ? "filtered" : "full"),
+      hideTallOutputs: options.hideTallOutputs !== false,
     };
     var bootstrapJson = JSON.stringify(bootstrap).replace(/<\//g, "<\\/");
 
@@ -2456,26 +2462,70 @@ if (typeof require !== "undefined" && typeof module !== "undefined" && require.m
 
     function usage() {
       process.stderr.write(
-        "Usage: node ipynb-to-html.js notebook.ipynb [-o out.html] [--title T] [--notes notes.json] [--readonly-notes]\n"
+        "Usage: node ipynb-to-html.js notebook.ipynb [-o out.html] [--title T] [--notes notes.json]\n" +
+          "       [--readonly-notes] [--source-name NAME] [--export-notebook file.ipynb]\n" +
+          "       [--export-source-name NAME] [--note-storage-key KEY]\n" +
+          "       [--diff-initial-mode full|filtered|additions|off]\n" +
+          "       [--hide-tall-outputs | --no-hide-tall-outputs]\n"
       );
     }
 
+    function requireValue(flag, argv, i) {
+      if (i + 1 >= argv.length) throw new Error(flag + " requires a value");
+      return argv[i + 1];
+    }
+
     function parseArgs(argv) {
-      var args = { notebook: null, output: null, title: null, notes: null, readonlyNotes: false };
+      var args = {
+        notebook: null,
+        output: null,
+        title: null,
+        notes: null,
+        readonlyNotes: false,
+        sourceName: null,
+        exportNotebook: null,
+        exportSourceName: null,
+        noteStorageKey: null,
+        diffInitialMode: null,
+        hideTallOutputs: true,
+      };
       var i = 0;
       while (i < argv.length) {
         var a = argv[i];
         if (a === "-o" || a === "--output") {
-          if (i + 1 >= argv.length) throw new Error(a + " requires a path");
-          args.output = argv[++i];
+          args.output = requireValue(a, argv, i);
+          i++;
         } else if (a === "--title") {
-          if (i + 1 >= argv.length) throw new Error("--title requires a value");
-          args.title = argv[++i];
+          args.title = requireValue(a, argv, i);
+          i++;
         } else if (a === "--notes") {
-          if (i + 1 >= argv.length) throw new Error("--notes requires a path");
-          args.notes = argv[++i];
+          args.notes = requireValue(a, argv, i);
+          i++;
         } else if (a === "--readonly-notes") {
           args.readonlyNotes = true;
+        } else if (a === "--source-name") {
+          args.sourceName = requireValue(a, argv, i);
+          i++;
+        } else if (a === "--export-notebook") {
+          args.exportNotebook = requireValue(a, argv, i);
+          i++;
+        } else if (a === "--export-source-name") {
+          args.exportSourceName = requireValue(a, argv, i);
+          i++;
+        } else if (a === "--note-storage-key") {
+          args.noteStorageKey = requireValue(a, argv, i);
+          i++;
+        } else if (a === "--diff-initial-mode") {
+          var mode = requireValue(a, argv, i);
+          if (!/^(full|filtered|additions|off)$/.test(mode)) {
+            throw new Error("--diff-initial-mode must be full, filtered, additions, or off");
+          }
+          args.diffInitialMode = mode;
+          i++;
+        } else if (a === "--hide-tall-outputs") {
+          args.hideTallOutputs = true;
+        } else if (a === "--no-hide-tall-outputs") {
+          args.hideTallOutputs = false;
         } else if (a === "-h" || a === "--help") {
           usage();
           process.exit(0);
@@ -2536,12 +2586,20 @@ if (typeof require !== "undefined" && typeof module !== "undefined" && require.m
         args.title != null
           ? args.title
           : path.basename(nbPath, path.extname(nbPath));
-      var html = api.convertNotebookToHtml(nb, {
+      var convertOptions = {
         title: title,
-        sourceName: path.basename(nbPath),
+        sourceName: args.sourceName != null ? args.sourceName : path.basename(nbPath),
         notes: notes,
         allowNotes: !args.readonlyNotes,
-      });
+        hideTallOutputs: args.hideTallOutputs,
+      };
+      if (args.exportNotebook != null) {
+        convertOptions.exportNotebook = loadNotebook(args.exportNotebook);
+      }
+      if (args.exportSourceName != null) convertOptions.exportSourceName = args.exportSourceName;
+      if (args.noteStorageKey != null) convertOptions.noteStorageKey = args.noteStorageKey;
+      if (args.diffInitialMode != null) convertOptions.diffInitialMode = args.diffInitialMode;
+      var html = api.convertNotebookToHtml(nb, convertOptions);
       var dir = path.dirname(outPath);
       if (dir && dir !== ".") fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(outPath, html, "utf8");

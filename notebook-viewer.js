@@ -600,6 +600,7 @@ async function makeHtmlSelfContained(html) {
       sourceName: state.sourceName,
       diffHasFilteredVariant: state.diffHasFilteredVariant,
       diffInitialMode: document.body.getAttribute("data-diff-mode") || state.diffInitialMode || "filtered",
+      hideTallOutputs: state.hideTallOutputs !== false,
       cellMarkdownHtml: state.cellMarkdownHtml || {},
       cellProjections: state.cellProjections || {}
     };
@@ -2463,9 +2464,11 @@ async function makeHtmlSelfContained(html) {
     return anchor;
   }
 
-  // A cell's outputs are long when their combined height exceeds 80% of the
+  // A cell's outputs are tall when their combined height exceeds 80% of the
   // viewport. Line and character counts are not used; the page measures layout.
-  function outputsAreLong(totalHeight, availableScreenHeight) {
+  const hideTallOutputs = state.hideTallOutputs !== false;
+
+  function outputsAreTall(totalHeight, availableScreenHeight) {
     if (!(availableScreenHeight > 0) || !(totalHeight > 0)) return false;
     return totalHeight > availableScreenHeight * 0.8;
   }
@@ -2496,8 +2499,8 @@ async function makeHtmlSelfContained(html) {
 
   function bindOutputCollapseToggle(collapse) {
     var toggle = directChildWithClass(collapse, "output-collapse-toggle");
-    if (!toggle || toggle._longOutputBound) return;
-    toggle._longOutputBound = true;
+    if (!toggle || toggle._tallOutputBound) return;
+    toggle._tallOutputBound = true;
     toggle.addEventListener("click", function () {
       collapse.classList.toggle("is-open");
       collapse.dataset.userToggled = "1";
@@ -2509,9 +2512,9 @@ async function makeHtmlSelfContained(html) {
     var toggle = directChildWithClass(collapse, "output-collapse-toggle");
     if (!toggle) return;
     var open = collapse.classList.contains("is-open");
-    var long = collapse.classList.contains("is-long");
+    var tall = collapse.classList.contains("is-tall");
     toggle.setAttribute("aria-expanded", open ? "true" : "false");
-    toggle.textContent = open && long ? "Hide long output" : "Show long output";
+    toggle.textContent = open && tall ? "Hide tall output" : "Show tall output";
   }
 
   function ensureOutputCollapse(group) {
@@ -2523,12 +2526,12 @@ async function makeHtmlSelfContained(html) {
       }
       if (!rows.length) return null;
       collapse = document.createElement("div");
-      collapse.className = "output-collapse is-long";
+      collapse.className = "output-collapse is-tall";
       var toggle = document.createElement("button");
       toggle.type = "button";
       toggle.className = "output-collapse-toggle";
       toggle.setAttribute("aria-expanded", "false");
-      toggle.textContent = "Show long output";
+      toggle.textContent = "Show tall output";
       var body = document.createElement("div");
       body.className = "output-collapse-body";
       collapse.appendChild(toggle);
@@ -2547,15 +2550,21 @@ async function makeHtmlSelfContained(html) {
   }
 
   function syncOutputCollapse(collapse) {
+    if (!hideTallOutputs) {
+      collapse.classList.remove("is-tall");
+      collapse.classList.add("is-open");
+      updateOutputCollapseToggle(collapse);
+      return;
+    }
     var available = availableScreenHeight();
     var total = totalOutputHeight(collapse);
-    var long = outputsAreLong(total, available);
+    var tall = outputsAreTall(total, available);
     var userChose = collapse.dataset.userToggled === "1";
     // Stay collapsed until both the screen and the output have a real height.
-    if (!userChose && (!(available > 0) || !(total > 0))) long = true;
-    collapse.classList.toggle("is-long", long);
+    if (!userChose && (!(available > 0) || !(total > 0))) tall = true;
+    collapse.classList.toggle("is-tall", tall);
     if (!userChose) {
-      if (long) collapse.classList.remove("is-open");
+      if (tall) collapse.classList.remove("is-open");
       else collapse.classList.add("is-open");
     }
     updateOutputCollapseToggle(collapse);
@@ -2563,13 +2572,13 @@ async function makeHtmlSelfContained(html) {
 
   function bindOutputImageLoads() {
     document.querySelectorAll(".output-collapse-body img").forEach(function (img) {
-      if (img._longOutputLoad) return;
-      img._longOutputLoad = true;
-      if (!img.complete) img.addEventListener("load", syncLongOutputs);
+      if (img._tallOutputLoad) return;
+      img._tallOutputLoad = true;
+      if (!img.complete) img.addEventListener("load", syncTallOutputs);
     });
   }
 
-  function syncLongOutputs() {
+  function syncTallOutputs() {
     outputCollapseGroups().forEach(function (group) {
       var collapse = ensureOutputCollapse(group);
       if (collapse) syncOutputCollapse(collapse);
@@ -2640,11 +2649,11 @@ async function makeHtmlSelfContained(html) {
     rebuildCellNotesRails();
     typesetMath();
     placeBetweenCellMarkers();
-    syncLongOutputs();
+    syncTallOutputs();
     requestAnimationFrame(function () {
       placeBetweenCellMarkers();
       layoutNoteCards();
-      syncLongOutputs();
+      syncTallOutputs();
       if (typeof updateNoteNav === "function") updateNoteNav();
     });
     const metaNotes = document.getElementById("meta-notes-count");
@@ -4917,9 +4926,9 @@ async function makeHtmlSelfContained(html) {
   }
 
   applyClientHighlights();
-  window.addEventListener("resize", function () { placeBetweenCellMarkers(); layoutNoteCards(); syncLongOutputs(); });
-  window.addEventListener("load", syncLongOutputs);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { syncLongOutputs(); });
+  window.addEventListener("resize", function () { placeBetweenCellMarkers(); layoutNoteCards(); syncTallOutputs(); });
+  window.addEventListener("load", syncTallOutputs);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { syncTallOutputs(); });
   wireNoteNav();
 
   state.downloadNotesJson = downloadNotesJson;

@@ -253,8 +253,8 @@ header.doc-header .meta {
 }
 .cell-body { padding: 0.55rem 0.65rem 0.65rem; min-width: 0; }
 /* Leave room under a collapsed button so its rounded corners stay visible. */
-.cell-body:has(> .outputs > .output-collapse.is-long:not(.is-open)),
-.cell-body:has(> .output-collapse.is-long:not(.is-open)) {
+.cell-body:has(> .outputs > .output-collapse.is-tall:not(.is-open)),
+.cell-body:has(> .output-collapse.is-tall:not(.is-open)) {
   padding-bottom: 0.45rem;
 }
 /* Drop the inset before In/Out so the code column picks up that width. */
@@ -563,22 +563,22 @@ mark.note-hl {
 .output-collapse-body { display: flow-root; }
 /* Clip the hidden text inside the body so the rounded button can sit on the
    cell border without being cut off. scrollHeight still reports the full height. */
-.output-collapse.is-long:not(.is-open) { overflow: visible; }
+.output-collapse.is-tall:not(.is-open) { overflow: visible; }
 /* Same prompt column and font as the code row, so 1ch matches and both
    the show and hide buttons line up with the code block. */
-.cell-code .output-collapse.is-long,
-.cell-synthetic-output .output-collapse.is-long {
+.cell-code .output-collapse.is-tall,
+.cell-synthetic-output .output-collapse.is-tall {
   display: grid;
   grid-template-columns: var(--prompt-col) minmax(0, 1fr);
   column-gap: var(--prompt-gap);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.8rem;
 }
-.output-collapse.is-long.is-open > .output-collapse-body {
+.output-collapse.is-tall.is-open > .output-collapse-body {
   grid-column: 1 / -1;
   grid-row: 2;
 }
-.output-collapse.is-long:not(.is-open) > .output-collapse-body {
+.output-collapse.is-tall:not(.is-open) > .output-collapse-body {
   position: absolute;
   left: 0;
   width: 100%;
@@ -602,7 +602,7 @@ mark.note-hl {
   background: var(--surface);
   padding: 0.35rem 0.6rem;
 }
-.output-collapse.is-long > .output-collapse-toggle {
+.output-collapse.is-tall > .output-collapse-toggle {
   display: flex;
   align-items: center;
   gap: 0.45rem;
@@ -619,13 +619,13 @@ mark.note-hl {
   border-right: 0.34em solid transparent;
 }
 /* Down while the output is hidden (show it); up while it is open (hide it). */
-.output-collapse.is-long:not(.is-open) > .output-collapse-toggle::before {
+.output-collapse.is-tall:not(.is-open) > .output-collapse-toggle::before {
   border-top: 0.42em solid currentColor;
 }
-.output-collapse.is-long.is-open > .output-collapse-toggle::before {
+.output-collapse.is-tall.is-open > .output-collapse-toggle::before {
   border-bottom: 0.42em solid currentColor;
 }
-.output-collapse.is-long.is-open > .output-collapse-toggle { margin-bottom: 0.35rem; }
+.output-collapse.is-tall.is-open > .output-collapse-toggle { margin-bottom: 0.35rem; }
 .output-collapse-toggle:hover { background: #f3f3f3; }
 .note-card {
   background: #fff;
