@@ -1120,10 +1120,79 @@
     }
   }
 
+  // CommonMark drops a backslash that escapes ASCII punctuation (\{ \} \_ ...).
+  function markdownUnescapePunct(text) {
+    return String(text).replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g, "$1");
+  }
+
+  function countNeedleBefore(haystack, needle, beforeIndex) {
+    if (!needle) return 0;
+    var start = 0;
+    var found = 0;
+    while (true) {
+      var idx = haystack.indexOf(needle, start);
+      if (idx < 0 || idx >= beforeIndex) return found;
+      found += 1;
+      start = idx + needle.length;
+    }
+  }
+
+  // Source needle after Markdown eats escape backslashes. Occurrence is counted
+  // in the unescaped source so a later copy (two \right\} in one formula) wins.
+  function rangeForMarkdownEscapes(textContent, source, noteStart, frag) {
+    var visibleFrag = markdownUnescapePunct(frag);
+    if (!visibleFrag || visibleFrag === frag) return null;
+    var needles = [visibleFrag];
+    var soft = softVisibleNeedle(visibleFrag);
+    if (soft && soft !== visibleFrag && soft !== frag) needles.push(soft);
+    var visibleSource = markdownUnescapePunct(source);
+    var visibleStart = markdownUnescapePunct(source.slice(0, Math.max(0, noteStart))).length;
+    for (var n = 0; n < needles.length; n++) {
+      var needle = needles[n];
+      var occ = countNeedleBefore(visibleSource, needle, visibleStart);
+      var at = findInText(textContent, needle, occ);
+      if (at < 0) at = findInText(textContent, needle, 0);
+      if (at >= 0) return [at, at + needle.length];
+    }
+    return null;
+  }
+
+  function renderedNeedleCandidates(text) {
+    var unescaped = markdownUnescapePunct(text);
+    var list = [text, unescaped, softVisibleNeedle(unescaped), softVisibleNeedle(text), String(text).trim()];
+    var out = [];
+    var seen = {};
+    for (var i = 0; i < list.length; i++) {
+      var cand = list[i];
+      if (!cand || seen[cand]) continue;
+      seen[cand] = true;
+      out.push(cand);
+    }
+    return out;
+  }
+
+  function findRenderedNeedle(textContent, source, noteStart, needle) {
+    if (!needle) return -1;
+    var srcAt = source.indexOf(needle, Math.max(0, noteStart));
+    var at;
+    if (srcAt >= 0) {
+      at = findInText(textContent, needle, countNeedleBefore(source, needle, srcAt));
+      if (at < 0) at = findInText(textContent, needle, 0);
+      return at;
+    }
+    var visibleSource = markdownUnescapePunct(source);
+    var visibleStart = markdownUnescapePunct(source.slice(0, Math.max(0, noteStart))).length;
+    at = findInText(textContent, needle, countNeedleBefore(visibleSource, needle, visibleStart));
+    if (at < 0) at = findInText(textContent, needle, 0);
+    return at;
+  }
+
   function noteTextRangesInRendered(textContent, source, note) {
     var frag = source.slice(note.start, note.end);
     var idx = findInText(textContent, frag, 0);
     if (idx >= 0) return [[idx, idx + frag.length]];
+    var escaped = rangeForMarkdownEscapes(textContent, source, note.start, frag);
+    if (escaped) return [escaped];
     var soft = softVisibleNeedle(frag);
     if (soft) {
       idx = findInText(textContent, soft, 0);
@@ -1140,11 +1209,10 @@
     var segs = lineSegments(note.start, note.end, source);
     for (var si = 0; si < segs.length; si++) {
       var lineFrag = source.slice(segs[si][0], segs[si][1]);
-      var candidates = [lineFrag, softVisibleNeedle(lineFrag), lineFrag.trim()];
+      var candidates = renderedNeedleCandidates(lineFrag);
       for (var c = 0; c < candidates.length; c++) {
         var cand = candidates[c];
-        if (!cand) continue;
-        idx = findInText(textContent, cand, 0);
+        idx = findRenderedNeedle(textContent, source, segs[si][0], cand);
         if (idx >= 0) {
           ranges.push([idx, idx + cand.length]);
           break;

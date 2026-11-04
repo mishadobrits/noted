@@ -1001,12 +1001,71 @@ async function makeHtmlSelfContained(html) {
     }
   }
 
+  // CommonMark drops a backslash that escapes ASCII punctuation (\{ \} \_ ...).
+  function markdownUnescapePunct(text) {
+    return String(text).replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g, "$1");
+  }
+
+  // Source needle after Markdown eats escape backslashes. Occurrence is counted
+  // in the unescaped source so a later copy (two \right\} in one formula) wins.
+  function rangeForMarkdownEscapes(textContent, source, noteStart, frag) {
+    const visibleFrag = markdownUnescapePunct(frag);
+    if (!visibleFrag || visibleFrag === frag) return null;
+    const needles = [visibleFrag];
+    const soft = softVisibleNeedle(visibleFrag);
+    if (soft && soft !== visibleFrag && soft !== frag) needles.push(soft);
+    const visibleSource = markdownUnescapePunct(source);
+    const visibleStart = markdownUnescapePunct(source.slice(0, Math.max(0, noteStart))).length;
+    for (let n = 0; n < needles.length; n++) {
+      const needle = needles[n];
+      const occ = countNonOverlappingBefore(visibleSource, needle, visibleStart);
+      let at = findNthInHaystack(textContent, needle, occ);
+      if (at < 0) at = textContent.indexOf(needle);
+      if (at >= 0) return [at, at + needle.length];
+    }
+    return null;
+  }
+
+  function renderedNeedleCandidates(text) {
+    const unescaped = markdownUnescapePunct(text);
+    const list = [text, unescaped, softVisibleNeedle(unescaped), softVisibleNeedle(text), String(text).trim()];
+    const out = [];
+    const seen = {};
+    for (let i = 0; i < list.length; i++) {
+      const cand = list[i];
+      if (!cand || seen[cand]) continue;
+      seen[cand] = true;
+      out.push(cand);
+    }
+    return out;
+  }
+
+  function findRenderedNeedle(textContent, source, noteStart, needle) {
+    if (!needle) return -1;
+    const srcAt = source.indexOf(needle, Math.max(0, noteStart));
+    if (srcAt >= 0) {
+      const occ = countNonOverlappingBefore(source, needle, srcAt);
+      let at = findNthInHaystack(textContent, needle, occ);
+      if (at < 0) at = textContent.indexOf(needle);
+      return at;
+    }
+    const visibleSource = markdownUnescapePunct(source);
+    const visibleStart = markdownUnescapePunct(source.slice(0, Math.max(0, noteStart))).length;
+    const occ = countNonOverlappingBefore(visibleSource, needle, visibleStart);
+    let at = findNthInHaystack(textContent, needle, occ);
+    if (at < 0) at = textContent.indexOf(needle);
+    return at;
+  }
+
   function noteTextRangesInRendered(textContent, source, note) {
     const frag = source.slice(note.start, note.end);
     const fragOcc = countNonOverlappingBefore(source, frag, note.start);
     let idx = findNthInHaystack(textContent, frag, fragOcc);
     if (idx < 0) idx = textContent.indexOf(frag);
     if (idx >= 0) return [[idx, idx + frag.length]];
+
+    const escaped = rangeForMarkdownEscapes(textContent, source, note.start, frag);
+    if (escaped) return [escaped];
 
     // Math-inclusive: map prose segments only (tex highlighted via .tex-math separately)
     const pieces = splitFragByMath(frag);
@@ -1016,16 +1075,10 @@ async function makeHtmlSelfContained(html) {
         if (p.kind !== "text") return;
         const t = p.text;
         if (!t || !t.trim()) return;
-        const candidates = [t, softVisibleNeedle(t), t.trim()];
+        const candidates = renderedNeedleCandidates(t);
         for (let c = 0; c < candidates.length; c++) {
           const cand = candidates[c];
-          if (!cand) continue;
-          const srcAt = source.indexOf(cand, Math.max(0, note.start));
-          const occ = (srcAt >= 0)
-            ? countNonOverlappingBefore(source, cand, srcAt)
-            : countNonOverlappingBefore(source, cand, note.start);
-          let at = findNthInHaystack(textContent, cand, occ);
-          if (at < 0) at = textContent.indexOf(cand);
+          const at = findRenderedNeedle(textContent, source, note.start, cand);
           if (at >= 0) {
             ranges.push([at, at + cand.length]);
             break;
@@ -1046,11 +1099,10 @@ async function makeHtmlSelfContained(html) {
     const ranges = [];
     lineSegments(note.start, note.end, source).forEach(function (pair) {
       const lineFrag = source.slice(pair[0], pair[1]);
-      const candidates = [lineFrag, softVisibleNeedle(lineFrag), lineFrag.trim()];
+      const candidates = renderedNeedleCandidates(lineFrag);
       for (let c = 0; c < candidates.length; c++) {
         const cand = candidates[c];
-        if (!cand) continue;
-        const at = textContent.indexOf(cand);
+        const at = findRenderedNeedle(textContent, source, pair[0], cand);
         if (at >= 0) {
           ranges.push([at, at + cand.length]);
           break;
