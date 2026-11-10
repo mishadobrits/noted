@@ -1,7 +1,8 @@
 /**
  * Merge two Jupyter notebooks into one unified notebook for the diff viewer.
  *
- * Alignment: prefer shared cell_id, else equal source (+ cell_type) via LCS.
+ * Alignment: preserve shared cell IDs, else equal source (+ cell_type) via LCS,
+ * including cells recreated with a different ID.
  * Outputs become separate synthetic cells so the existing MIME renderer is reused.
  * Diff chrome metadata (line statuses and inline runs) lives on
  * cell.metadata.ipynb_to_html.diff. Diff decoration is never stored as a note.
@@ -1067,8 +1068,21 @@
       ),
     };
 
-    var ops = diffSequences(baseCells, headCells, function (a, b) {
-      return alignKey(a) === alignKey(b);
+    var baseKeys = baseCells.map(function (cell) {
+      return { id: cellIdOf(cell), content: contentKey(cell) };
+    });
+    var headKeys = headCells.map(function (cell) {
+      return { id: cellIdOf(cell), content: contentKey(cell) };
+    });
+    var baseIds = new Set(baseKeys.map(function (key) { return key.id; }));
+    var sharedIds = new Set(headKeys.filter(function (key) {
+      return key.id && baseIds.has(key.id);
+    }).map(function (key) { return key.id; }));
+    var ops = diffSequences(baseKeys, headKeys, function (a, b) {
+      if (a.id && a.id === b.id) return true;
+      // A duplicate source must not take the place of a surviving cell ID.
+      if (sharedIds.has(a.id) || sharedIds.has(b.id)) return false;
+      return a.content === b.content;
     });
 
     var cells = [];
