@@ -1869,7 +1869,7 @@
     return '<div class="diff-source-view ' + className + '">' + content + "</div>";
   }
 
-  function wrapSourceWithOptionalGutter(codeInnerHtml, diff, rightInnerHtml, filteredView, additionsView) {
+  function wrapSourceWithOptionalGutter(codeInnerHtml, diff, rightInnerHtml, filteredView, additionsView, renderedRight) {
     if (!diff || !diff.lines || !diff.lines.length) {
       return (
         '<pre class="source annotatable" data-role="cell-source"><code>' +
@@ -1887,9 +1887,10 @@
       (additionsView
         ? sourceDiffView(additionsView.html, additionsView.diff, "diff-additions-source")
         : "") +
-      '<pre class="source annotatable diff-right-source" data-role="cell-source"><code>' +
-      rightInnerHtml +
-      "</code></pre>"
+      (renderedRight
+        ? '<div class="diff-right-source">' + rightInnerHtml + '</div>'
+        : '<pre class="source annotatable diff-right-source" data-role="cell-source"><code>' +
+          rightInnerHtml + "</code></pre>")
     );
   }
 
@@ -1992,9 +1993,9 @@
       );
     }
 
-    if (ctype === "markdown") {
+    if (ctype === "markdown" && !(diff && diff.right_source != null && diff.status === "change")) {
       var inner = renderMarkdownWithNotes(src, matched);
-      // Markdown keeps rendered HTML; tint notes + optional whole-cell bg carry the diff.
+      // Unchanged and wholly added/deleted Markdown keeps its rendered view.
       return wrapCell(
         cellId,
         "cell-md" + diffCls,
@@ -2003,7 +2004,7 @@
         diff
       );
     }
-    if (ctype === "raw") {
+    if (ctype === "raw" || ctype === "markdown") {
       var rawDecorations = diffDecorationSpans(src, diff);
       var rawDisplayNotes =
         diff && diff.right_source != null
@@ -2014,7 +2015,9 @@
       );
       var rightAnnotated =
         diff && diff.right_source != null
-          ? renderPlainWithNotes(noteSource, matched)
+          ? (ctype === "markdown"
+            ? renderMarkdownWithNotes(noteSource, matched)
+            : renderPlainWithNotes(noteSource, matched))
           : null;
       var rawFiltered = namedDiffVariant(diff, "filtered");
       var rawAdditions = additionsOnlyVariant(
@@ -2056,11 +2059,12 @@
               ),
               diff: rawAdditions.diff,
             }
-          : null
+          : null,
+        ctype === "markdown"
       );
       return wrapCell(
         cellId,
-        "cell-raw" + diffCls,
+        (ctype === "markdown" ? "cell-md" : "cell-raw") + diffCls,
         inner,
         matched.concat(outAnchorNotes),
         diff

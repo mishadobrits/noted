@@ -79,4 +79,42 @@ var filtered = merge([cell("old", "x = ...")], [cell("new", "x = ...")], {
 diff.attachDiffVariant(full, filtered, "filtered");
 assert.equal(full.cells[0].metadata.ipynb_to_html.diff.variants.filtered.status, "equal");
 
+// A Markdown edit is a single matched cell with fragment/line diff metadata.
+var markdown = merge(
+  [cell("markdown", "# Task\n\nTrain for 10 epochs.\n\nKeep this paragraph.\n", "markdown")],
+  [cell("markdown", "# Task\n\nTrain for 20 epochs.\n\nKeep this paragraph.\n", "markdown")]
+);
+assert.equal(markdown.cells.length, 1);
+assert.equal(statuses(markdown), "change");
+assert.ok(markdown.cells[0].metadata.ipynb_to_html.diff.inline_runs.some(Boolean));
+assert.equal(markdown.cells[0].metadata.ipynb_to_html.diff.right_source,
+  "# Task\n\nTrain for 20 epochs.\n\nKeep this paragraph.\n");
+
+// Multiline and markup-only changes must remain present in the full diff.
+[
+  ["First paragraph.\n\nOld paragraph.\n", "First paragraph.\n\nNew paragraph.\n"],
+  ["Plain text\n", "**Plain text**\n"],
+  ["[paper](https://old.example)\n", "[paper](https://new.example)\n"],
+  ["$$ x^2 $$\n", "$$ x^3 $$\n"],
+].forEach(function (pair) {
+  var notebook = merge([cell("md", pair[0], "markdown")], [cell("md", pair[1], "markdown")]);
+  assert.equal(notebook.cells.length, 1);
+  assert.equal(statuses(notebook), "change");
+});
+
+// Markdown diff shows source fragments; No diff still renders the new Markdown.
+var converter = require("./ipynb-to-html.js");
+var markdownHtml = converter.convertNotebookToHtml(merge(
+  [cell("md", "Train for **10 epochs**.\n", "markdown")],
+  [cell("md", "Train for **20 epochs**.\n", "markdown")]
+));
+assert.ok(markdownHtml.includes('class="diff-source-view diff-full-source"'));
+assert.ok(markdownHtml.includes('class="diff-inline diff-inline-del"'));
+assert.ok(markdownHtml.includes('class="diff-right-source"><div class="md-rendered annotatable"'));
+assert.ok(markdownHtml.includes('<strong>20 epochs</strong>'));
+var addedMarkdownHtml = converter.convertNotebookToHtml(merge([], [cell("new-md", "# New section\n", "markdown")]));
+var addedBody = addedMarkdownHtml.split('<main class="cells-stack" id="cells-stack">')[1].split('</main>')[0];
+assert.ok(addedBody.includes('<h1>New section</h1>'));
+assert.ok(!addedBody.includes('class="diff-source-view'));
+
 console.log("Notebook cell matching checks passed.");

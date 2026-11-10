@@ -2147,7 +2147,7 @@ async function makeHtmlSelfContained(html) {
     if (view && view.classList.contains("diff-additions-source") && diff.variants && diff.variants.additions) {
       return { source: String(diff.variants.additions.source || ""), diff: diff.variants.additions };
     }
-    if (root && root.classList && root.classList.contains("diff-right-source")) {
+    if (root && root.closest && root.closest(".diff-right-source")) {
       return { source: String(diff.right_source || ""), diff: null };
     }
     return { source: cellSource(cellId), diff: diff };
@@ -2642,27 +2642,28 @@ async function makeHtmlSelfContained(html) {
 
     document.querySelectorAll("section.cell").forEach(function (section) {
       const cellId = section.getAttribute("data-cell-id") || section.getAttribute("data-cell");
-      const source = cellSource(cellId);
       const ctype = cellType(cellId);
-      const matched = matchAnchorsOnText(source, notes(), function (a) {
-        return a.target === "cell" && a.cell_id === cellId;
-      });
 
       if (ctype === "markdown") {
         const root = section.querySelector(".md-rendered.annotatable");
         if (root) {
+          const markdownSource = diffViewForRoot(cellId, root).source;
+          const markdownMatched = matchAnchorsOnText(markdownSource, notes(), function (a) {
+            return a.target === "cell" && a.cell_id === cellId;
+          });
           let clean = (state.cellMarkdownHtml && state.cellMarkdownHtml[String(cellId)]) || "";
           // Prefer live markdown render so heading/body emphasis always matches source
           // (covers stale embeds / client fallbacks). Keep precomputed HTML as fallback.
           try {
-            const live = commentMarkdownToHtml(source);
+            const live = commentMarkdownToHtml(markdownSource);
             if (live && live.trim()) clean = live;
           } catch (e) { /* keep clean */ }
           root.innerHTML = clean || root.innerHTML;
-          applyMarksToRenderedRoot(root, source, matched);
-          placeBetweenMarkersAbsolute(root, source, cellId);
+          applyMarksToRenderedRoot(root, markdownSource, markdownMatched);
+          placeBetweenMarkersAbsolute(root, markdownSource, cellId);
         }
-      } else {
+      }
+      if (ctype !== "markdown" || section.querySelector("pre.source.annotatable")) {
         section.querySelectorAll("pre.source.annotatable").forEach(function (pre) {
           const view = diffViewForRoot(cellId, pre);
           const viewSource = view.source;
@@ -3035,7 +3036,7 @@ async function makeHtmlSelfContained(html) {
     const source = diffViewForRoot(cellId, root).source;
     const ctype = cellType(cellId);
 
-    if (ctype === "code" || ctype === "raw") {
+    if (ctype === "code" || ctype === "raw" || root.matches("pre.source")) {
       // No KaTeX in code/raw â plain text selection is trustworthy
       const selected = range.toString().replace(/\r\n/g, "\n").replace(/\r/g, "\n");
       if (!selected) return null;

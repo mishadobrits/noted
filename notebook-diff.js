@@ -1130,12 +1130,7 @@
       if (op.type === "equal") {
         var baseCell = baseCells[op.ai];
         var headCell = headCells[op.bi];
-        if (
-          baseCell.cell_type !== headCell.cell_type ||
-          (sourceText(baseCell) !== sourceText(headCell) &&
-            (baseCell.cell_type === "markdown" ||
-              headCell.cell_type === "markdown"))
-        ) {
+        if (baseCell.cell_type !== headCell.cell_type) {
           var removedMarkdown = buildSideCell(baseCell, "del", mergeOptions);
           var addedMarkdown = buildSideCell(headCell, "add", mergeOptions);
           ensureMeta(removedMarkdown.cell).diff.nav_target = false;
