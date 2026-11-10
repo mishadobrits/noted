@@ -19,6 +19,46 @@
   var toast = document.getElementById("toast");
   var DEFAULT_IGNORE_DELETION_PATTERNS = ["^[^A-Za-zА-Яа-яЁё0-9]*$"];
   var DEFAULT_IGNORE_ADDITION_PATTERNS = ["^\\s*$"];
+  var selectedStudentFiles = [];
+  var selectedNotesFiles = [];
+
+  function accumulateFiles(input, list, selected) {
+    function render() {
+      list.innerHTML = "";
+      selected.forEach(function (file, index) {
+        var row = document.createElement("li");
+        var name = document.createElement("span");
+        name.textContent = file.name;
+        var remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "Remove";
+        remove.setAttribute("aria-label", "Remove " + file.name);
+        remove.addEventListener("click", function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          selected.splice(index, 1);
+          render();
+        });
+        row.appendChild(name);
+        row.appendChild(remove);
+        list.appendChild(row);
+      });
+    }
+    input.addEventListener("change", function () {
+      Array.from(input.files || []).forEach(function (file) {
+        var duplicate = selected.some(function (existing) {
+          return existing.name === file.name && existing.size === file.size &&
+            existing.lastModified === file.lastModified;
+        });
+        if (!duplicate) selected.push(file);
+      });
+      input.value = "";
+      render();
+    });
+  }
+
+  accumulateFiles(studentInput, document.getElementById("selected-student-files"), selectedStudentFiles);
+  accumulateFiles(notesInput, document.getElementById("selected-notes-files"), selectedNotesFiles);
 
   var state = {
     base: null,
@@ -613,9 +653,9 @@
 
   document.getElementById("open-selected").addEventListener("click", function () {
     var baseFile = baseInput.files && baseInput.files[0];
-    var studentFiles = Array.from(studentInput.files || []);
+    var studentFiles = selectedStudentFiles.slice();
     var taskFile = taskInput.files && taskInput.files[0];
-    var notesFiles = Array.from(notesInput.files || []);
+    var notesFiles = selectedNotesFiles.slice();
     if (!baseFile || !studentFiles.length) {
       setStatus("Choose one base notebook and at least one student submission.", true);
       return;

@@ -59,6 +59,10 @@
   .file-box.tasks-file { grid-column: 1 / -1; }
   .file-box strong { display: block; margin-bottom: 0.4rem; }
   .file-box input { width: 100%; }
+  .selected-files { margin: 0.5rem 0 0; padding: 0; list-style: none; }
+  .selected-files li { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.3rem; }
+  .selected-files span { overflow-wrap: anywhere; flex: 1; min-width: 0; }
+  .selected-files button { padding: 0.15rem 0.4rem; }
   .loader-actions { display: flex; flex-wrap: wrap; gap: 0.65rem; margin-top: 1rem; }
   .status { min-height: 1.35em; margin-top: 0.8rem; color: var(--muted); }
   .status.error { color: #9c2f2f; }
@@ -172,6 +176,8 @@
         <label class="file-box">
           <strong>Student submissions</strong>
           <input type="file" id="student-files" multiple>
+          <span>Choose files again to add more submissions.</span>
+          <ul class="selected-files" id="selected-student-files" aria-live="polite"></ul>
         </label>
         <label class="file-box tasks-file">
           <strong>Task ranges JSON (optional)</strong>
@@ -182,6 +188,7 @@
           <strong>Student notes (optional)</strong>
           <input type="file" id="notes-files" accept="application/json,.json" multiple>
           <span>Select one notes JSON per student, in the same order as the student submissions.</span>
+          <ul class="selected-files" id="selected-notes-files" aria-live="polite"></ul>
         </label>
       </div>
       <div class="loader-actions">
