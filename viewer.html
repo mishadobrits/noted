@@ -375,6 +375,7 @@
       </div>
       <div class="row">
         <button type="button" class="primary" id="btn-open" disabled>Open notebook</button>
+        <button type="button" id="btn-swap" hidden disabled>Swap base and head</button>
         <button type="button" id="btn-download" disabled>Download as HTML</button>
         <button type="button" id="btn-clear-notes" disabled>Clear loaded notes</button>
       </div>
@@ -440,6 +441,7 @@
   var headLabel = document.getElementById("head-label");
   var pairLabel = document.getElementById("pair-label");
   var btnOpen = document.getElementById("btn-open");
+  var btnSwap = document.getElementById("btn-swap");
   var btnDownload = document.getElementById("btn-download");
   var btnClearNotes = document.getElementById("btn-clear-notes");
   var statusEl = document.getElementById("status");
@@ -471,6 +473,8 @@
   var headName = "";
   var pendingNotes = null;
   var pendingNotesLabel = "";
+  var baseNotes = null;
+  var baseNotesLabel = "";
   var lastHtml = null;
   var lastName = "notebook-diff.html";
   var appliedIgnorePatterns = ignoreDeletions.value;
@@ -508,6 +512,8 @@
 
   function applyChrome() {
     panel.classList.toggle("mode-same", !!sameMode);
+    btnSwap.hidden = sameMode;
+    btnSwap.disabled = !(baseNb && headNb);
     if (sameMode) {
       loadRow.hidden = true;
       dropSame.hidden = false;
@@ -604,6 +610,7 @@
 
   function updateActions() {
     var ready = !!(baseNb && headNb);
+    btnSwap.disabled = !ready;
     btnOpen.disabled = !ready;
     btnDownload.disabled = !ready || !lastHtml;
     if (ready && !lastHtml) maybeConvert(false);
@@ -635,6 +642,8 @@
         var nb = IpynbToHtml.loadNotebookJson(String(reader.result || ""));
         if (side === "base") {
           baseNb = nb;
+          baseNotes = null;
+          baseNotesLabel = "";
           baseName = file.name;
           baseLabel.textContent = file.name;
         } else {
@@ -989,6 +998,36 @@
     var html = maybeConvert(true);
     if (!html) return;
     showDiff(html, true);
+  });
+  btnSwap.addEventListener("click", function () {
+    if (sameMode || !baseNb || !headNb) return;
+    // Keep review notes with their notebook when reversing the comparison.
+    var frameState = !diffWorkspace.hidden && diffFrame.contentWindow.__IPYNB_TO_HTML__;
+    if (frameState && frameState.exportSourceName === headName) {
+      pendingNotes = JSON.parse(JSON.stringify(frameState.notes || []));
+    }
+    var previousBase = baseNb;
+    var previousBaseName = baseName;
+    var previousBaseNotes = baseNotes;
+    var previousBaseNotesLabel = baseNotesLabel;
+    baseNb = headNb;
+    baseName = headName;
+    baseNotes = pendingNotes;
+    baseNotesLabel = pendingNotesLabel;
+    headNb = previousBase;
+    headName = previousBaseName;
+    pendingNotes = previousBaseNotes;
+    pendingNotesLabel = previousBaseNotesLabel;
+    baseLabel.textContent = baseName;
+    headLabel.textContent = headName;
+    pairLabel.textContent = baseName + " → " + headName;
+    baseInput.value = "";
+    headInput.value = "";
+    pairInput.value = "";
+    notesInput.value = "";
+    updateNotesChip();
+    lastHtml = null;
+    updateActions();
   });
   document.getElementById("notes-allow").addEventListener("click", function () {
     selectNotes(false);
