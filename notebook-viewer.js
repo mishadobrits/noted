@@ -1113,6 +1113,9 @@ async function makeHtmlSelfContained(html) {
   }
 
   function applyMarksToRenderedRoot(root, source, matched) {
+    // KaTeX replaces its target's children. Render first so it cannot erase
+    // the note highlights and connector anchors installed below.
+    if (matched.length) typesetMath(root);
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode: function (n) {
         let p = n.parentElement;
@@ -1173,8 +1176,11 @@ async function makeHtmlSelfContained(html) {
         mark.setAttribute("data-note", String(note.note_id));
         mark.setAttribute("data-anchor", String(note.anchor_index != null ? note.anchor_index : 0));
         mark.style.backgroundColor = highlightBg(note);
-        while (b.el.firstChild) mark.appendChild(b.el.firstChild);
-        b.el.appendChild(mark);
+        // Keep the display-math wrapper outside the inline highlight so the
+        // formula retains its layout and the connector measures its contents.
+        const content = b.el.querySelector(".katex") || b.el;
+        while (content.firstChild) mark.appendChild(content.firstChild);
+        content.appendChild(mark);
       });
     });
 
@@ -1275,9 +1281,9 @@ async function makeHtmlSelfContained(html) {
     el.innerHTML = renderStyledPlain(text, styles, matched);
   }
 
-  function typesetMath() {
+  function typesetMath(root) {
     if (typeof katex === "undefined" || !katex || typeof katex.render !== "function") return;
-    document.querySelectorAll(".md-rendered .tex-math, .note-card-body .tex-math").forEach(function (el) {
+    (root || document).querySelectorAll(".md-rendered .tex-math, .note-card-body .tex-math").forEach(function (el) {
       if (el.querySelector(".katex")) return;
       const raw = el.getAttribute("data-tex") || "";
       if (!raw) return;
